@@ -12,6 +12,6 @@ transform = transforms.Compose([
     transforms.Normalize((0.5,), (0.5,))
 ])
 
-celeba_train = CelebA(root=CSV_PATH, split='train', download=True, transform=transform)
-celeba_val   = CelebA(root=CSV_PATH, split='valid', download=True, transform=transform)
-celeba_test  = CelebA(root=CSV_PATH, split='test', download=True, transform=transform)
+celeba_train = CelebA(root=CSV_PATH, split='train', download=False, transform=transform)
+celeba_val   = CelebA(root=CSV_PATH, split='valid', download=False, transform=transform)
+celeba_test  = CelebA(root=CSV_PATH, split='test', download=False, transform=transform)
