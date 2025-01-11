@@ -21,13 +21,12 @@ MODELS_PATH: str = os.path.dirname(SRC_PATH) + '\\models'
 
 TRAIN:          bool = False
 CONTINUE_TRAIN: bool = False
-MODEL_NAME:     str  = 'torch' # "nasz" albo "torch"
+MODEL_NAME:     str  = 'nasz' # "nasz" albo "torch"
 
 class FaceIDModel(pl.LightningModule):
-    def __init__(self, model, train_loader, val_loader, criterion, lr=1e-4):
+    def __init__(self, model, train_loader, val_loader, lr=1e-4):
         super(FaceIDModel, self).__init__()
         self.model = model
-        self.criterion = criterion
         self.lr = lr
         self.train_acc = BinaryAccuracy()
         self.val_acc = BinaryAccuracy()
@@ -175,31 +174,42 @@ if __name__ == "__main__":
         model_pre    = FaceID_CNN()
         # criterion    = nn.BCELoss()
         train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, img_size=img_size, traits=['Male'])
-        criterion    = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        model        = FaceIDModel(model_pre, train_loader, val_loader, criterion)
+        model        = FaceIDModel(model_pre, train_loader, val_loader)
     elif MODEL_NAME == "torch":
         model_pre = Ready_faceID_CNN()
         # criterion    = nn.BCELoss()
         train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, img_size=img_size, traits=['Eyeglasses'])
-        criterion    = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        model        = FaceIDModel(model_pre, train_loader, val_loader, criterion)
+        model        = FaceIDModel(model_pre, train_loader, val_loader)
 
     if TRAIN:
         if CONTINUE_TRAIN:
             checkpoint_path = MODELS_PATH + f"\\{MODEL_NAME}.ckpt"
+
+            checkpoint = torch.load(checkpoint_path)
+            if "criterion.pos_weight" in checkpoint["state_dict"]:
+                del checkpoint["state_dict"]["criterion.pos_weight"]
+            torch.save(checkpoint, checkpoint_path)
+
             model_continue = FaceIDModel.load_from_checkpoint(
                 checkpoint_path=checkpoint_path,
                 model=model.model,
                 train_loader=train_loader,
                 val_loader=val_loader
             )
-            # model.set_criterion(criterion=criterion)
+            criterion    = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            model.criterion = criterion
             train(model=model_continue)
         else:
-            # model.set_criterion(criterion=criterion)
+            criterion    = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            model.criterion = criterion
             train(model=model)
     else:
         checkpoint_path = MODELS_PATH + f"\\{MODEL_NAME}.ckpt"
+
+        checkpoint = torch.load(checkpoint_path)
+        if "criterion.pos_weight" in checkpoint["state_dict"]:
+            del checkpoint["state_dict"]["criterion.pos_weight"]
+        torch.save(checkpoint, checkpoint_path)
 
         model = FaceIDModel.load_from_checkpoint(
             checkpoint_path=checkpoint_path,
@@ -207,8 +217,8 @@ if __name__ == "__main__":
             train_loader=train_loader,
             val_loader=val_loader
         )
-
-        # model.set_criterion(criterion=criterion)
+        criterion    = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        model.criterion = criterion
 
         model.eval()
         model.freeze()
