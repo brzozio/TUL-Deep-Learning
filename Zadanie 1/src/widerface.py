@@ -11,10 +11,9 @@ import zipfile
 import gdown
 import requests
 
-# Define paths
-SRC_PATH: str = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH: str = os.path.join(os.path.dirname(SRC_PATH), "csv")
-OUTPUT_PATH = os.path.join(DATA_PATH, "processed_wider_faces")
+SRC_PATH: str       = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH: str      = os.path.join(os.path.dirname(SRC_PATH), "csv")
+OUTPUT_PATH: str    = os.path.join(DATA_PATH, "processed_wider_faces")
 os.makedirs(OUTPUT_PATH, exist_ok=True)
 
 def download_file_from_google_drive(file_id, root, filename, md5=None):
@@ -29,7 +28,6 @@ def download_file_from_google_drive(file_id, root, filename, md5=None):
         gdown.download(url, output_path, quiet=False)
     
     if md5:
-        # Check if the md5 hash matches
         if not verify_md5(output_path, md5):
             raise ValueError(f"MD5 mismatch for {filename}.")
     
@@ -62,11 +60,9 @@ def download_and_extract_archive(url, download_root, md5=None):
                 f.write(chunk)
     
     if md5:
-        # Verify MD5 checksum
         if not verify_md5(zip_path, md5):
             raise ValueError(f"MD5 mismatch for {zip_path}.")
     
-    # Extract the archive
     if zipfile.is_zipfile(zip_path):
         print(f"Extracting {zip_path}...")
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
@@ -223,21 +219,16 @@ class WIDERFace(VisionDataset):
                 except Exception as e:
                     print(f"Error extracting {member}: {e}")
 
-
-# Filter images based on the number of faces
 def filter_images_from_folder(dataset_root, annotations_file, min_faces=3, max_faces=5, split="train"):
-    """Filters images based on the number of faces by reading from extracted folders."""
+    """Filters images based on the number of faces and frontal face pose by reading from extracted folders."""
     
-    # Path to the images and annotations folder
     images_folder = os.path.join(dataset_root, f"WIDER_{split}\\WIDER_{split}\\images")
     annotations_folder = os.path.join(dataset_root, "wider_face_split")
     
-    # Load the annotation file for the given split (train, val, or test)
     annotation_file_path = os.path.join(annotations_folder, annotations_file)
     
     selected_images = []
 
-    # Open the annotation file and parse it
     with open(annotation_file_path, "r") as f:
         lines = f.readlines()
         
@@ -266,86 +257,90 @@ def filter_images_from_folder(dataset_root, annotations_file, min_faces=3, max_f
                     box_annotation_line = False
                     file_name_line = True
                     
-                    # If the image contains faces within the range, process it
+                    # If the image contains faces within the range and includes frontally faced faces
                     if min_faces <= len(labels) <= max_faces:
-                        try:
-                            img = Image.open(img_path)
-                            img_info = {
-                                "img_path": img_path,
-                                "annotations": {
-                                    "bbox": torch.tensor([label[:4] for label in labels]),
-                                    "blur": torch.tensor([label[4] for label in labels]),
-                                    "expression": torch.tensor([label[5] for label in labels]),
-                                    "illumination": torch.tensor([label[6] for label in labels]),
-                                    "occlusion": torch.tensor([label[7] for label in labels]),
-                                    "pose": torch.tensor([label[8] for label in labels]),
-                                    "invalid": torch.tensor([label[9] for label in labels]),
+                        # Check if all faces are frontally faced (pose == 0)
+                        poses = [label[9] for label in labels]  # pose values are at index 8 in labels
+                        if all(pose == 0 for pose in poses):  # Ensure all faces are frontal
+                            try:
+                                img = Image.open(img_path)
+                                img_info = {
+                                    "img_path": img_path,
+                                    "annotations": {
+                                        "bbox": torch.tensor([label[:4] for label in labels]),
+                                        "blur": torch.tensor([label[4] for label in labels]),
+                                        "expression": torch.tensor([label[5] for label in labels]),
+                                        "illumination": torch.tensor([label[6] for label in labels]),
+                                        "occlusion": torch.tensor([label[7] for label in labels]),
+                                        "pose": torch.tensor([label[8] for label in labels]),
+                                        "invalid": torch.tensor([label[9] for label in labels]),
+                                    }
                                 }
-                            }
-                            selected_images.append((img_info, img))
-                        except Exception as e:
-                            print(f"Image had too long path so it was skipped. Moving on ..")
+                                selected_images.append((img_info, img))
+                            except Exception as e:
+                                print(f"Image had too long path or other error, skipping it..")
                     # Reset for the next image
                     labels.clear()
                     box_counter = 0
 
-    # Limit the number of images if necessary
     if len(selected_images) > 100:
         selected_images = selected_images[:100]
 
     return selected_images
 
-# Save cropped faces from bounding boxes
-def save_faces_from_bounding_boxes(images, output_path):
-    """Saves faces cropped from bounding boxes as separate images."""
+def save_faces_from_bounding_boxes(images, output_path, expansion_factor=0.2):
+    """Saves faces cropped from bounding boxes as separate images with numerical filenames and creates annotations in JSON."""
     annotations = []
+    image_counter = 1
+    
+    os.makedirs(output_path, exist_ok=True)
+    
     for img_info, image in images:
-        # Ensure the image is in PIL format
         if isinstance(image, torch.Tensor):
             image = ToPILImage()(image)
 
-        bboxes = img_info["annotations"]["bbox"]  # Bounding boxes from annotations
+        bboxes = img_info["annotations"]["bbox"]
         for i, bbox in enumerate(bboxes):
-            # Convert bounding box coordinates to integers
-            x, y, w, h = [int(coord.item()) for coord in bbox]  # Use .item() to convert tensors to integers
-            
-            # Crop the face
+            x, y, w, h = [int(coord.item()) for coord in bbox]
+
+            expansion = int(min(w, h) * expansion_factor)
+            x = max(x - expansion, 0)
+            y = max(y - expansion, 0)
+            w = min(w + 2 * expansion, image.width - x)
+            h = min(h + 2 * expansion, image.height - y)
+
             face = image.crop((x, y, x + w, y + h))
+
+            face = face.resize((128, 128))
+
+            face_filename = f"file_{image_counter}.jpg"
+            face_path = os.path.join(output_path, face_filename)
             
-            # Construct face image filename
-            face_path = os.path.join(output_path, f"image_{os.path.basename(img_info['img_path'])}_face_{i}.jpg")
-            
-            # Ensure the output path exists
-            os.makedirs(output_path, exist_ok=True)
-            
-            # Save the cropped face
             face.save(face_path)
             
-            # Add annotation entry for this cropped face
             annotations.append({
-                "image_path": face_path,
-                "attributes": {"smiling": None, "wearing_glasses": None}  # Update attributes as needed
+                "image_path": face_filename,
+                "attributes": {"Male": False, "Smiling": False}
             })
 
-    # Save the annotations as a JSON file
+            image_counter += 1
+
     with open(os.path.join(output_path, "annotations.json"), "w") as f:
         json.dump(annotations, f, indent=4)
 
     print(f"Saved faces and annotations to {output_path}")
 
-
-# Main execution
 if __name__ == "__main__":
     print("Downloading and preparing the WIDERFace dataset...")
     dataset = WIDERFace(DATA_PATH, split="train", download=True)
     
     print("Filtering images with the appropriate number of faces...")
-    annotations_file = "wider_face_train_bbx_gt.txt"  # For training split
+    annotations_file = "wider_face_train_bbx_gt.txt"
 
     filtered_images = filter_images_from_folder(DATA_PATH+"\\widerface", annotations_file, min_faces=3, max_faces=5)
 
     
     print("Saving cropped faces and creating annotations...")
-    save_faces_from_bounding_boxes(filtered_images, OUTPUT_PATH)
+    save_faces_from_bounding_boxes(filtered_images, OUTPUT_PATH, expansion_factor=0.2)
     
     print(f"Data preparation complete. All data saved in folder: {OUTPUT_PATH}")

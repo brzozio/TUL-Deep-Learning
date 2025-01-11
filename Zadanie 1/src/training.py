@@ -26,9 +26,11 @@ JSON_PATH:   str = os.path.dirname(SRC_PATH) + '\\json'
 MODELS_PATH: str = os.path.dirname(SRC_PATH) + '\\models'
 
 TRAIN:          bool = False
-CONTINUE_TRAIN: bool = False
+CONTINUE_TRAIN: bool = True
 MODEL_NAME:     str  = 'nasz' # "nasz" albo "torch"
 CAMERA_TEST:    bool = False
+CELEBA_TEST:    bool = False
+WIDERFACE_TEST: bool = True
 
 class FaceIDModel(pl.LightningModule):
     def __init__(self, model, train_loader, val_loader, lr=1e-4):
@@ -180,12 +182,14 @@ if __name__ == "__main__":
     if MODEL_NAME == "nasz":
         model_pre    = FaceID_CNN()
         # criterion    = nn.BCELoss()
-        train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, img_size=img_size, traits=['Male'])
+        trait = ['Male']
+        train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, img_size=img_size, traits=trait)
         model        = FaceIDModel(model_pre, train_loader, val_loader)
     elif MODEL_NAME == "torch":
         model_pre = Ready_faceID_CNN()
         # criterion    = nn.BCELoss()
-        train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, img_size=img_size, traits=['Eyeglasses'])
+        trait = ['Smiling']
+        train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, img_size=img_size, traits=['Smiling'])
         model        = FaceIDModel(model_pre, train_loader, val_loader)
 
     if TRAIN:
@@ -197,7 +201,7 @@ if __name__ == "__main__":
                 del checkpoint["state_dict"]["criterion.pos_weight"]
             torch.save(checkpoint, checkpoint_path)
 
-            model_continue = FaceIDModel.load_from_checkpoint(
+            model = FaceIDModel.load_from_checkpoint(
                 checkpoint_path=checkpoint_path,
                 model=model.model,
                 train_loader=train_loader,
@@ -205,13 +209,13 @@ if __name__ == "__main__":
             )
             criterion    = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
             model.criterion = criterion
-            train(model=model_continue)
+            train(model=model)
         else:
             criterion    = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
             model.criterion = criterion
             train(model=model)
     else:
-        if CAMERA_TEST == False:
+        if CELEBA_TEST == True:
             checkpoint_path = MODELS_PATH + f"\\{MODEL_NAME}.ckpt"
 
             checkpoint = torch.load(checkpoint_path)
@@ -252,7 +256,7 @@ if __name__ == "__main__":
 
             test_accuracy = (all_predictions == all_targets).float().mean().item()
             print(f"Test Accuracy: {test_accuracy:.4f}")
-        else:
+        elif CAMERA_TEST == True:
             def detect(frame, detector):
                 detections = detector.detect_multi_scale(
                     img=frame, scale_factor=1.2, step_ratio=1,
@@ -330,8 +334,7 @@ if __name__ == "__main__":
 
                     with torch.no_grad():
                         output = model(preprocessed_face)
-                        prediction = torch.sigmoid(output).item()
-                        label = "Positive" if prediction > 0.5 else "Negative"
+                        label = "Positive" if output > 0.5 else "Negative"
 
                     cv2.putText(
                         frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2
@@ -346,3 +349,57 @@ if __name__ == "__main__":
 
             cap.release()
             cv2.destroyAllWindows()
+
+        elif WIDERFACE_TEST == True:
+            def preprocess_widerface(image, img_size=128):
+                """Preprocess the WIDERFACE image for model inference."""
+                transform = transforms.Compose([
+                    transforms.Resize((img_size, img_size)),
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.5,), (0.5,))  # Assuming single-channel grayscale
+                ])
+                image = Image.open(image).convert("RGB")  # Convert to RGB in case images are grayscale
+                return transform(image).unsqueeze(0)  # Add batch dimension
+
+            checkpoint_path = f"{MODELS_PATH}\\{MODEL_NAME}.ckpt"
+            checkpoint = torch.load(checkpoint_path)
+
+            if "criterion.pos_weight" in checkpoint["state_dict"]:
+                del checkpoint["state_dict"]["criterion.pos_weight"]
+
+            torch.save(checkpoint, checkpoint_path)
+
+            model = FaceIDModel.load_from_checkpoint(
+                checkpoint_path=checkpoint_path,
+                model=model.model,
+                train_loader=None,
+                val_loader=None 
+            )
+
+            criterion = nn.BCEWithLogitsLoss()
+            model.criterion = criterion
+
+            model.eval()
+            model.freeze()
+
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model = model.to(device)
+
+            processed_faces_folder = CSV_PATH + "\\processed_wider_faces"
+            processed_faces = [os.path.join(processed_faces_folder, f) for f in os.listdir(processed_faces_folder) if f.endswith(".jpg")]
+
+            annotations = pd.read_json(processed_faces_folder + "\\annotations_DONE.json")
+
+            trait_test = trait[0]
+
+            all_predictions = []
+            print(f"Number of pictures: {len(processed_faces)}")
+            for face_idx, face_image_path in enumerate(processed_faces):
+                preprocessed_face = preprocess_widerface(face_image_path).to(device)
+
+                with torch.no_grad():
+                    output = model(preprocessed_face)
+                    label = True if output > 0.5 else False
+                    all_predictions.append(trait_test if annotations["attributes"][face_idx][trait_test] == label else "Negative")
+
+            print(f'Accuracy : {len([element for element in all_predictions if element == trait_test])/len(processed_faces):.2f}')
