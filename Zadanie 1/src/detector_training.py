@@ -131,6 +131,10 @@ def train_model(model, dataset, device, epochs=30, batch_size=4, lr=0.0005, save
 
     train_size = int(0.8 * len(dataset.image_data))
     val_size = len(dataset.image_data) - train_size
+
+    # val_size = int(0.1 * len(dataset.image_data))
+    # train_size = len(dataset.image_data) - val_size
+
     # val_dataset.image_data, train_dataset.image_data = random_split(dataset.image_data, [train_size, val_size])
     # train_images, val_images = random_split(dataset.image_data, [train_size, val_size])
     # train_dataset.image_data = train_images
@@ -140,7 +144,7 @@ def train_model(model, dataset, device, epochs=30, batch_size=4, lr=0.0005, save
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, num_workers=6)
-    val_data_loader   = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=6)
+    val_data_loader   = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, num_workers=6)
     
     model.to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=0.0005)
@@ -170,6 +174,7 @@ def train_model(model, dataset, device, epochs=30, batch_size=4, lr=0.0005, save
 
             # Compute losses
             loss_dict = model(images, targets)
+
             losses = sum(loss for loss in loss_dict.values())
 
             # Handle NaN or invalid losses
@@ -182,22 +187,29 @@ def train_model(model, dataset, device, epochs=30, batch_size=4, lr=0.0005, save
             optimizer.step()
             total_loss += losses.item()
         
-
         # Compute average loss for the epoch
         avg_loss = total_loss / len(train_data_loader)
         elapsed_time = time.time() - start_time  # Measure time for the epoch
         print(f"Epoch {epoch + 1}/{epochs}, Loss train: {avg_loss:.4f}, Time: {elapsed_time:.2f} seconds")
 
         # Validation loop
-        model.eval()  # Set model to evaluation mode
+        # model.eval()  # Set model to evaluation mode
         total_val_loss = 0
         with torch.no_grad():  # No gradients are needed for validation
             for images, targets in val_data_loader:
                 images = [img.to(device) for img in images]
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-                loss_dict = model(images, targets)
-                losses = sum(loss for loss in loss_dict.values())
+                output = model(images, targets)
+
+                # If model output is a list, sum the losses
+                if isinstance(output, list):
+                    losses = sum(output)
+                elif isinstance(output, dict):
+                    losses = sum(loss for loss in output.values())
+                else:
+                    raise TypeError("Unexpected type of model output during validation.")
+
                 total_val_loss += losses.item()
 
         avg_val_loss = total_val_loss / len(val_data_loader)
@@ -232,7 +244,11 @@ def train_model(model, dataset, device, epochs=30, batch_size=4, lr=0.0005, save
 
 if __name__ == "__main__":
     transform = torchvision.transforms.Compose([
-        torchvision.transforms.Resize((300, 300)),
+        torchvision.transforms.Resize((800, 800)),
+        torchvision.transforms.RandomHorizontalFlip(),
+        torchvision.transforms.RandomRotation(20),
+        torchvision.transforms.ColorJitter(brightness=0.3, contrast=0.3),
+        torchvision.transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0)),
         torchvision.transforms.ToTensor(),
         torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
@@ -240,7 +256,7 @@ if __name__ == "__main__":
     dataset = WiderFaceDataset(images_folder=IMAGES_PATH, annotations_file=ANNOTATIONS_FILE, transform=transform)
     print(f"Dataset len is: {len(dataset.image_data)}")
 
-    # dataset.image_data = dataset.image_data[:20000]
+    # dataset.image_data = dataset.image_data[:10]
 
     model = fasterrcnn_resnet50_fpn(pretrained=True)
     in_features = model.roi_heads.box_predictor.cls_score.in_features

@@ -28,9 +28,9 @@ CSV_PATH:    str = os.path.dirname(SRC_PATH) + '\\csv'
 JSON_PATH:   str = os.path.dirname(SRC_PATH) + '\\json'
 MODELS_PATH: str = os.path.dirname(SRC_PATH) + '\\models'
 
-TRAIN:          bool = True
+TRAIN:          bool = False
 CONTINUE_TRAIN: bool = False
-MODEL_NAME:     str  = 'nasz' # "nasz" albo "torch"
+MODEL_NAME:     str  = 'torch' # "nasz" albo "torch"
 CAMERA_TEST:    bool = True
 CELEBA_TEST:    bool = False
 WIDERFACE_TEST: bool = False
@@ -100,30 +100,47 @@ class CelebADataset(torch.utils.data.Dataset):
 
         return image, torch.tensor(label)
 
-def prepare_data(traits, batch_size=32, img_size=128, num_workers=4):
-        
-    train_transform3 = transforms.Compose([
-        transforms.Resize((img_size, img_size)),
-        transforms.ColorJitter(brightness=0.3, contrast=0.3),
-        transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))  # Assuming RGB
-    ])
+def prepare_data(traits, batch_size=32, num_workers=8, model_name=None):
+    
+    if model_name == 'nasz':
+        train_transform3 = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ColorJitter(brightness=0.3, contrast=0.3),
+            transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))  # Assuming RGB
+        ])
 
-    train_transform = transforms.Compose([
-        transforms.Resize((img_size, img_size)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(20),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))  # Assuming RGB
-    ])
+        train_transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(20),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))  # Assuming RGB
+        ])
 
 
-    val_test_transform = transforms.Compose([
-        transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
+        val_test_transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))  # Assuming RGB
+        ])
+    elif model_name == 'torch':
+        train_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(20),
+            transforms.ColorJitter(brightness=0.3, contrast=0.3),
+            transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+        val_test_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
 
     dataset_path     = os.path.join(CSV_PATH, "celeba")
     img_folder_path  = os.path.join(dataset_path, "img_align_celeba")
@@ -159,13 +176,13 @@ def prepare_data(traits, batch_size=32, img_size=128, num_workers=4):
         raise ValueError("One of the dataset splits is empty. Check your data files and partition file.")
 
     train_data   = CelebADataset(img_folder_path, train_df, train_transform)
-    train_data_3 = CelebADataset(img_folder_path, train_df, train_transform3)
-    combined_train_data = ConcatDataset([train_data, train_data_3])
+    # train_data_3 = CelebADataset(img_folder_path, train_df, train_transform3)
+    # combined_train_data = ConcatDataset([train_data, train_data_3])
      
     val_data   = CelebADataset(img_folder_path, val_df, val_test_transform)
     test_data  = CelebADataset(img_folder_path, test_df, val_test_transform)
 
-    train_loader = DataLoader(combined_train_data, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
 
     val_loader   = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
     test_loader  = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
@@ -238,18 +255,18 @@ def plot_losses(train_losses, val_losses):
 
 if __name__ == "__main__":
     batch_size = 32
-    img_size = 128
+    img_size = 224
     if MODEL_NAME == "nasz":
         model_pre    = FaceID_CNN()
         # criterion    = nn.BCELoss()
         trait = ['Male']
-        train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, img_size=img_size, traits=trait)
+        train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, traits=trait, model_name=MODEL_NAME)
         model        = FaceIDModel(model_pre, train_loader, val_loader)
     elif MODEL_NAME == "torch":
         model_pre = Ready_faceID_CNN()
         # criterion    = nn.BCELoss()
         trait = ['Smiling']
-        train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, img_size=img_size, traits=['Smiling'])
+        train_loader, val_loader, test_loader, pos_weight = prepare_data(batch_size=batch_size, traits=trait, model_name=MODEL_NAME)
         model        = FaceIDModel(model_pre, train_loader, val_loader)
 
     if TRAIN:
@@ -445,13 +462,22 @@ if __name__ == "__main__":
             cv2.destroyAllWindows()
 
         elif WIDERFACE_TEST == True:
-            def preprocess_widerface(image, img_size=128):
+            def preprocess_widerface(image):
                 """Preprocess the WIDERFACE image for model inference."""
-                transform = transforms.Compose([
-                    transforms.Resize((img_size, img_size)),
-                    transforms.ToTensor(),
-                    transforms.Normalize((0.5,), (0.5,))  # Assuming single-channel grayscale
-                ])
+                
+                if MODEL_NAME == 'nasz':
+                    transform = transforms.Compose([
+                        transforms.Resize((128, 128)),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))  # Assuming RGB
+                    ])
+                elif MODEL_NAME == 'torch':
+                    transform = transforms.Compose([
+                        transforms.Resize((224, 224)),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                    ])
+                    
                 image = Image.open(image).convert("RGB")  # Convert to RGB in case images are grayscale
                 return transform(image).unsqueeze(0)  # Add batch dimension
 
