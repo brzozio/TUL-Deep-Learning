@@ -2,6 +2,12 @@ import cv2
 
 from skimage.data import lbp_frontal_face_cascade_filename
 from skimage.feature import Cascade
+import os
+
+SRC_PATH:    str = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH:    str = os.path.dirname(SRC_PATH) + '\\csv'
+JSON_PATH:   str = os.path.dirname(SRC_PATH) + '\\json'
+MODELS_PATH: str = os.path.dirname(SRC_PATH) + '\\models'
 
 def detect(frame, detector):
     detections = detector.detect_multi_scale(img=frame, scale_factor=1.2, step_ratio=1,
@@ -23,7 +29,7 @@ def draw(frame, boxes):
 
 if __name__ == '__main__':
     # file = lbp_frontal_face_cascade_filename()
-    file = "./face.xml"
+    file = os.path.join(CSV_PATH, "face.xml")
     detector = Cascade(file)
 
     cap = cv2.VideoCapture(0)

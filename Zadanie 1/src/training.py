@@ -168,7 +168,7 @@ def prepare_data(traits, batch_size=32, num_workers=8, model_name=None):
 
     train_df = non_filtered_df[non_filtered_df["partition"] == 0].drop(columns=["partition"])
     val_df   = non_filtered_df[non_filtered_df["partition"] == 1].drop(columns=["partition"])
-    test_df  = non_filtered_df[non_filtered_df["partition"] == 2].drop(columns=["partition"])
+    test_df  = non_filtered_df[non_filtered_df["partition"] == 2].drop(columns=["partition"])[:500]
 
     # print(f"Train size: {len(train_df)}, Validation size: {len(val_df)}, Test size: {len(test_df)}")
 
@@ -324,20 +324,35 @@ if __name__ == "__main__":
             all_predictions = []
             all_targets = []
 
+            wrongly_classified: list = []
+            correctly_classified: list = []
+
             with torch.no_grad():
                 for batch in test_loader:
                     x, y = batch
                     x, y = x.to(device), y.to(device)
 
                     outputs = model(x)
-                    predictions = (outputs > 0.5).float()
+                    probabilities = torch.sigmoid(outputs)
+                    predictions = (probabilities > 0.5).float()
                     all_predictions.append(predictions.cpu())
                     all_targets.append(y.cpu())
+
+                    for idx in range(len(outputs)):
+                        output = probabilities[idx]
+                        prediction = predictions[idx]
+                        ground_truth = y[idx]
+
+                        if output.item() > 0.8 and ground_truth.item() == prediction.item():
+                            correctly_classified.append({"picture": x[idx], "probability": output.item()})
+                            # print(f"Picture: {x[idx]}, probability: {output.item()}")
+                        elif output.item() < 0.4 and ground_truth.item() != prediction.item():
+                            wrongly_classified.append({"picture": x[idx], "probability": output.item()})
+                            # print(f"Picture: {x[idx]}, probability: {output.item()}")
 
             all_predictions = torch.cat(all_predictions)
             all_targets = torch.cat(all_targets)
 
-            # test_accuracy = (all_predictions == all_targets).float().mean().item()
             test_accuracy = 0
             
             for pred_i, pred in enumerate(all_predictions):
@@ -348,18 +363,65 @@ if __name__ == "__main__":
 
             cm = confusion_matrix(all_targets, all_predictions)
 
-            # Plot the confusion matrix
             plt.figure(figsize=(8, 6))
             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Negative', 'Positive'], yticklabels=['Negative', 'Positive'])
             plt.xlabel('Predicted Labels')
             plt.ylabel('True Labels')
             plt.title(f'Confusion Matrix - {trait[0]}')
             plt.show()
+
+            for obj in correctly_classified:
+                image_path = obj["picture"]
+                probability = obj["probability"]
+                title = f"Correctly Classified\nProbability: {probability:.2f}"
+
+                image_tensor = image_path.cpu()
+                mean = torch.tensor([0.485, 0.456, 0.406])
+                std = torch.tensor([0.229, 0.224, 0.225])
+                image_tensor = image_tensor[[2, 1, 0], :, :] 
+
+                image_tensor = image_tensor * std[:, None, None] + mean[:, None, None]
+
+                image_tensor = torch.clamp(image_tensor, 0, 1) 
+                image_tensor = (image_tensor * 255).byte() 
+
+                to_pil = transforms.ToPILImage()
+                image = to_pil(image_tensor)
+
+                plt.imshow(image)
+                plt.title(title)
+                plt.axis("off")
+                plt.show()
+            
+            for obj in wrongly_classified:
+                image_path = obj["picture"]
+                probability = obj["probability"]
+                title = f"Wrongly Classified\nProbability: {probability:.2f}"
+
+                image_tensor = image_path.cpu()
+                mean = torch.tensor([0.485, 0.456, 0.406])
+                std = torch.tensor([0.229, 0.224, 0.225])
+                image_tensor = image_tensor[[2, 1, 0], :, :] 
+
+                image_tensor = image_tensor * std[:, None, None] + mean[:, None, None]
+
+                image_tensor = torch.clamp(image_tensor, 0, 1) 
+                image_tensor = (image_tensor * 255).byte() 
+
+                to_pil = transforms.ToPILImage()
+                image = to_pil(image_tensor)
+
+                plt.imshow(image)
+                plt.title(title)
+                plt.axis("off")
+                plt.show()
+
+
         elif CAMERA_TEST == True:
             def detect(frame, detector):
                 detections = detector.detect_multi_scale(
                     img=frame, scale_factor=1.2, step_ratio=1,
-                    min_size=(128, 128), max_size=(200, 200)
+                    min_size=(100, 100), max_size=(200, 200)
                 )
                 boxes = []
                 for detection in detections:
@@ -387,15 +449,26 @@ if __name__ == "__main__":
                                         thickness=2)
                 return frame
 
-            def preprocess_face(image, img_size=128):
-                """Preprocess the face image for model inference."""
-                transform = transforms.Compose([
-                    transforms.Resize((img_size, img_size)),
-                    transforms.ToTensor(),
-                    transforms.Normalize((0.5,), (0.5,))
-                ])
-                image = Image.fromarray(image)
-                return transform(image).unsqueeze(0)
+            def preprocess_face(image):
+
+                if MODEL_NAME == 'nasz':
+                    """Preprocess the face image for model inference."""
+                    transform = transforms.Compose([
+                        transforms.Resize((128, 128)),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
+                    ])
+                    image = Image.fromarray(image)
+                    return transform(image).unsqueeze(0)
+                elif MODEL_NAME == 'torch':
+                    """Preprocess the face image for model inference."""
+                    transform = transforms.Compose([
+                        transforms.Resize((224, 224)),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                    ])
+                    image = Image.fromarray(image)
+                    return transform(image).unsqueeze(0)
             
             face_cascade_file = CSV_PATH + "\\face.xml"
             detector = Cascade(face_cascade_file)
@@ -441,7 +514,7 @@ if __name__ == "__main__":
 
                 for x, y, w, h in boxes:
                     face = frame[y:y + h, x:x + w]
-                    preprocessed_face = preprocess_face(face, img_size=img_size).to(device)
+                    preprocessed_face = preprocess_face(face).to(device)
 
                     with torch.no_grad():
                         output = model(preprocessed_face)
@@ -515,17 +588,31 @@ if __name__ == "__main__":
             all_predictions = []
             all_targets     = []
 
+            wrongly_classified: list = []
+            correctly_classified: list = []
+
             print(f"Number of pictures: {len(processed_faces)}")
             for face_idx, face_image_path in enumerate(processed_faces):
                 preprocessed_face = preprocess_widerface(face_image_path).to(device)
 
                 with torch.no_grad():
                     output = model(preprocessed_face)
-                    label = 1.0 if output > 0.5 else 0.0
+                    prob_output = torch.sigmoid(output)
+                    label = 1.0 if prob_output > 0.5 else 0.0
+                    
                     all_predictions.append(torch.tensor([label], dtype=torch.float32))
 
                     ground_truth = 1.0 if annotations["attributes"][face_idx][trait_test] else 0.0
                     all_targets.append(torch.tensor([ground_truth], dtype=torch.float32))
+                
+                if output > 0.8 and ground_truth == label:
+                    correctly_classified.append({"picture": face_image_path, "probability": prob_output.item()})
+                    print(f"Picture: {face_image_path}, probability: {prob_output.item()}")
+                elif output < 0.4 and ground_truth != label:
+                    wrongly_classified.append({"picture": face_image_path, "probability":prob_output.item()})
+                    print(f"Picture: {face_image_path}, probability: {prob_output.item()}")
+
+
 
             all_predictions = torch.cat(all_predictions)
             all_targets = torch.cat(all_targets)
@@ -549,3 +636,25 @@ if __name__ == "__main__":
             plt.ylabel('True Labels')
             plt.title(f'Confusion Matrix - {trait[0]}')
             plt.show()
+
+            for obj in correctly_classified:
+                image_path = obj["picture"]
+                probability = obj["probability"]
+                title = f"Correctly Classified\nProbability: {probability:.2f}"
+                image = Image.open(image_path)
+                plt.imshow(image)
+                plt.title(title)
+                plt.axis("off")
+                plt.show()
+            
+            for obj in wrongly_classified:
+                image_path = obj["picture"]
+                probability = obj["probability"]
+                title = f"Wrongly Classified\nProbability: {probability:.2f}"
+                image = Image.open(image_path)
+                plt.imshow(image)
+                plt.title(title)
+                plt.axis("off")
+                plt.show()
+            
+                            
