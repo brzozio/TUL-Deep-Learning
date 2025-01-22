@@ -4,15 +4,15 @@ from torch_geometric.nn import GCNConv, TransformerConv, global_mean_pool
 
 
 class GNNModelClassification(nn.Module):
-    def __init__(self):
+    def __init__(self, embedding: int = 32):
         super(GNNModelClassification, self).__init__()
 
         self.conv1 = TransformerConv(in_channels=9, out_channels=16)
-        self.conv2 = TransformerConv(in_channels=16, out_channels=32)
+        self.conv2 = TransformerConv(in_channels=16, out_channels=embedding)
 
         self.pool = global_mean_pool
 
-        self.fc1 = nn.Linear(32, 64)
+        self.fc1 = nn.Linear(embedding, 64)
         self.fc2 = nn.Linear(64, 2)
 
         self.relu = nn.ReLU()
@@ -45,21 +45,24 @@ class GNNModelClassification(nn.Module):
         return self.output_activation(x)
 
 class GNNModelRegression(nn.Module):
-    def __init__(self):
+    def __init__(self, embedding: int = 32, linear: bool = True):
         super(GNNModelRegression, self).__init__()
 
         self.conv1 = TransformerConv(in_channels=11, out_channels=16)
-        self.conv2 = TransformerConv(in_channels=16, out_channels=32) #Dodatkowo 1 i 2 na out_channels
+        self.conv2 = TransformerConv(in_channels=16, out_channels=embedding) #Dodatkowo 1 i 2 na out_channels
 
         self.pool = global_mean_pool
 
-        self.fc1 = nn.Linear(32, 64)
-        self.fc2 = nn.Linear(64,1)
+        if linear:
+            self.fc1 = nn.Linear(embedding, 1)
+        else:
+            self.fc1 = nn.Linear(embedding, 64)
+            self.fc2 = nn.Linear(64,1)
 
         self.relu = nn.ReLU()
         self.output_activation = nn.Identity()
 
-    def forward(self, data):
+    def forward(self, data, linear: bool = True):
         x, edge_index, batch = data.x, data.edge_index, data.batch
 
         print(f"x type: {type(x)} | shape: {x.shape if isinstance(x, torch.Tensor) else 'Not a tensor'}")
@@ -80,7 +83,10 @@ class GNNModelRegression(nn.Module):
 
         x = self.pool(x, batch)
 
-        x = self.relu(self.fc1(x))
-        x = self.fc2(x)
+        if linear:
+            x = self.relu(self.fc1(x))
+        else:
+            x = self.relu(self.fc1(x))
+            x = self.fc2(x)
 
         return self.output_activation(x)
