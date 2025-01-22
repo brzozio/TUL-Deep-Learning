@@ -29,8 +29,7 @@ LEARNING_RATE:  float = 1e-4
 TRAIN:          bool = False
 CONTINUE_TRAIN: bool = False
 
-# MODEL_NAME: str = "classification"
-MODEL_NAME: str  = "regression"
+log: list = []
 
 class DipoleMomentTransform(BaseTransform):
             def __call__(self, data):
@@ -50,40 +49,142 @@ def plot_losses(train_losses, val_losses, modelname):
     plt.grid()
     plt.savefig(CSV_PATH+f"\\Losses_{modelname}.jpg")
 
-def plot_decision_boundary(X, func, modelname, y_true=None)-> None:
-    try:
-        fig, ax = plt.subplots()
-        # Definiujemy zakres dla osi x i y
-        x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
-        y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
-        
-        # Tworzymy siatkę punktów w celu wygenerowania granicy decyzyjnej
-        xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.1),
-                            np.arange(y_min, y_max, 0.1))
-        
-        # Obliczamy etykiety dla każdego punktu w siatce
-        meshgrid_tensor = torch.tensor(np.c_[xx.ravel(), yy.ravel()], dtype=torch.double)
-        Z = func(meshgrid_tensor)
-        Z = torch.argmax(Z,dim=1).detach().numpy().reshape(xx.shape)
-        print(Z)
+def generate_decision_boundary(test_loader, model, embedding_size, model_name):
+    """
+    Generate a decision boundary plot for classification tasks.
+    Args:
+        test_loader: DataLoader for the test set.
+        model: Trained classification model.
+        embedding_size: Size of the embedding space.
+    """
+    model.eval()
+    all_features = []
+    all_labels = []
 
-        #Predykcja etykiet dla danych testowych podanych w funkcji
-        if y_true is None:
-            y_tested = torch.argmax(func(X), dim=1).numpy()
-        else: y_tested=y_true
+    with torch.no_grad():
+        for batch in test_loader:
+            x, edge_index, batch_labels = batch.x.to(DEVICE), batch.edge_index.to(DEVICE), batch.y.to(DEVICE)
 
-        # Rysujemy kontury granicy decyzyjnej
-        ax.contourf(xx, yy, Z, alpha=0.4)
-        
-        # Rysujemy punkty treningowe
-        ax.scatter(X[:, 0], X[:, 1], c=y_tested, s=20, edgecolors='k')
-        
-        plt.xlabel('Feature 1')
-        plt.ylabel('Feature 2')
-        plt.title(modelname)
-        plt.savefig(CSV_PATH+f"\\Decision_Boundary_{modelname}.jpg")
-    except Exception as e:
-        print(f"Failed to do decision boundary for : {modelname} with an error: {e}")
+            # Ensure input data is float
+            x = x.float()
+            edge_index = edge_index.long()  # Ensure edge_index is long
+
+            print(f"X type: {x.dtype}, edge_index type: {edge_index.dtype}")
+
+            # Forward pass to extract embeddings
+            embeddings = model.model.conv1(x, edge_index)
+            embeddings = model.model.conv2(embeddings, edge_index)
+            embeddings = model.model.pool(embeddings, batch.batch.to(DEVICE))
+
+            all_features.append(embeddings.cpu())
+            all_labels.append(batch_labels.cpu())
+
+    # Combine all features and labels
+    all_features = torch.cat(all_features, dim=0).numpy()
+    all_labels = torch.cat(all_labels, dim=0).numpy()
+
+    # Reduce embeddings to 2D for visualization if needed
+    if embedding_size > 2:
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=2)
+        all_features = pca.fit_transform(all_features)
+
+    # Check if features are 1D or 2D
+    if all_features.shape[1] == 1:
+        # If the features are 1D, plot as a 1D scatter plot
+        plt.figure(figsize=(8, 6))
+        plt.scatter(all_features[:, 0], np.zeros_like(all_features[:, 0]), c=all_labels, cmap='coolwarm', s=20, edgecolor='k')
+        plt.colorbar(label="Class")
+        plt.title(f"{model_name} (Embedding Size={embedding_size})")
+        plt.xlabel("Feature 1")
+        plt.grid()
+        plt.savefig(CSV_PATH + f"\\Decision_Boundary_{model_name}_{embedding_size}.jpg")
+        plt.show()
+
+    else:
+        # If the features are 2D or higher, plot normally
+        # Define grid for decision boundary
+        x_min, x_max = all_features[:, 0].min() - 1, all_features[:, 0].max() + 1
+        y_min, y_max = all_features[:, 1].min() - 1, all_features[:, 1].max() + 1
+        xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100))
+
+        # Predict on the grid points
+        grid_points = np.c_[xx.ravel(), yy.ravel()]
+        grid_points_tensor = torch.tensor(grid_points, dtype=torch.float32).to(DEVICE)
+        with torch.no_grad():
+            grid_predictions = model(grid_points_tensor)
+            grid_predictions = torch.softmax(grid_predictions, dim=-1).argmax(dim=-1).cpu().numpy()
+        grid_predictions = grid_predictions.reshape(xx.shape)
+
+        # Plot decision boundary
+        plt.figure(figsize=(8, 6))
+        plt.contourf(xx, yy, grid_predictions, alpha=0.6, cmap='coolwarm')
+        plt.scatter(all_features[:, 0], all_features[:, 1], c=all_labels, edgecolor='k', cmap='coolwarm', s=20)
+        plt.title(f"{model_name} (Embedding Size={embedding_size})")
+        plt.xlabel("Feature 1")
+        plt.ylabel("Feature 2")
+        plt.colorbar(label="Class")
+        plt.savefig(CSV_PATH + f"\\Decision_Boundary_{model_name}_{embedding_size}.jpg")
+        plt.show()
+
+def visualize_embedding_space(model, data_loader, task_type, embedding_size, linear_type, model_name):
+    """
+    Visualizes the embedding space for a trained model.
+    """
+    model.eval()
+    all_embeddings = []
+    all_labels = []
+
+    with torch.no_grad():
+        for batch in data_loader:
+            x, edge_index, batch_labels = batch.x.to(DEVICE), batch.edge_index.to(DEVICE), batch.y.to(DEVICE)
+
+            # Forward pass to extract embeddings
+            x = x.float()
+            edge_index = edge_index.long()
+
+            print(f"X type: {x.dtype}, edge_index type: {edge_index.dtype}")
+
+            embeddings = model.model.conv1(x, edge_index)
+            embeddings = model.model.conv2(embeddings, edge_index)
+            embeddings = model.model.pool(embeddings, batch.batch.to(DEVICE))
+
+            all_embeddings.append(embeddings.cpu())
+            all_labels.append(batch_labels.cpu())
+
+    # Combine embeddings and labels
+    all_embeddings = torch.cat(all_embeddings, dim=0).numpy()
+    all_labels = torch.cat(all_labels, dim=0).numpy()
+
+    # If embedding space > 2 dimensions, reduce using PCA
+    if embedding_size > 2:
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=2)
+        all_embeddings = pca.fit_transform(all_embeddings)
+
+    # Check if embeddings are 1D or 2D
+    if all_embeddings.shape[1] == 1:
+        # If the embeddings are 1D, plot as a 1D scatter plot
+        plt.figure(figsize=(8, 6))
+        plt.scatter(all_embeddings[:, 0], np.zeros_like(all_embeddings[:, 0]), c=all_labels.squeeze(), cmap='coolwarm', s=20, edgecolor='k')
+        plt.colorbar(label="Class" if task_type == 'classification' else "Predicted Value")
+        plt.title(f"{model_name} (size={embedding_size})")
+        plt.xlabel("Embedding Dimension 1")
+        plt.grid()
+        plt.savefig(CSV_PATH + f"\\Embedding_Space_{model_name}.jpg")
+        plt.show()
+
+    else:
+        # If the embeddings are 2D or higher, plot normally
+        plt.figure(figsize=(8, 6))
+        scatter = plt.scatter(all_embeddings[:, 0], all_embeddings[:, 1], c=all_labels.squeeze(), cmap='coolwarm', s=20, edgecolor='k')
+        plt.colorbar(scatter, label="Class" if task_type == 'classification' else "Predicted Value")
+        plt.title(f"{model_name} (size={embedding_size})")
+        plt.xlabel("Embedding Dimension 1")
+        plt.ylabel("Embedding Dimension 2")
+        plt.grid()
+        plt.savefig(CSV_PATH + f"\\Embedding_Space_{model_name}.jpg")
+        plt.show()
 
 class FaceIDModel(pl.LightningModule):
     def __init__(self, model, train_loader, val_loader, task_type, lr=1e-4):
@@ -233,7 +334,7 @@ def main_transformer_conv() -> None:
     EMBEDDINGS:     list  = [1,2,32]
     LINEAR_REGRESSION:   list  = [True, False]
     # MODEL_NAME:     list  = ["regression", "classification"]
-    MODEL_NAME:     list  = ["classification"]
+    MODEL_NAME:     list  = ["regression"]
 
     for model_name_id in MODEL_NAME:
         loop_count: int = len(LINEAR_REGRESSION) if model_name_id == "regression" else 1
@@ -274,6 +375,20 @@ def main_transformer_conv() -> None:
                     model.eval()
                     model.freeze()
 
+                    #  # Visualize embedding space
+                    # visualize_embedding_space(
+                    #     model=model,
+                    #     data_loader=test_loader,
+                    #     task_type=model_name_id,
+                    #     embedding_size=embed_id,
+                    #     linear_type=LINEAR_REGRESSION[linear_id] if model_name_id == 'regression' else None,
+                    #     model_name=saveModelName
+                    # )
+
+                    # # Plot decision boundary for classification
+                    # if model_name_id == 'classification':
+                    #     generate_decision_boundary(test_loader, model, embed_id, saveModelName)
+
                     all_predictions = []
                     all_targets = []
 
@@ -317,6 +432,8 @@ def main_transformer_conv() -> None:
                         mse = torch.mean((all_predictions - all_targets) ** 2).item()
                         print(f"Mean Squared Error (MSE) {saveModelName}: {mse:.4f}")
 
+                        log.append(f"Model: {saveModelName}, MSE: {mse:.4f}\n")
+
                 model            = None
                 train_loader     = None
                 val_loader       = None
@@ -329,7 +446,7 @@ def main_gcn_conv() -> None:
     EMBEDDINGS:     list  = [1,2,32]
     LINEAR_REGRESSION:   list  = [True, False]
     # MODEL_NAME:     list  = ["regression", "classification"]
-    MODEL_NAME:     list  = ["classification"]
+    MODEL_NAME:     list  = ["regression"]
 
     for model_name_id in MODEL_NAME:
         loop_count: int = len(LINEAR_REGRESSION) if model_name_id == "regression" else 1
@@ -357,6 +474,7 @@ def main_gcn_conv() -> None:
                     train_losses, val_losses = train_model(model, saveModelName)
                     plot_losses(train_losses, val_losses, saveModelName)
                 else:
+
                     checkpoint_path = MODELS_PATH + f"\\{saveModelName}.ckpt"
 
                     model = FaceIDModel.load_from_checkpoint(checkpoint_path, model=model_core, train_loader=train_loader, val_loader=val_loader, task_type=model_name_id, lr=LEARNING_RATE)
@@ -369,6 +487,20 @@ def main_gcn_conv() -> None:
 
                     model.eval()
                     model.freeze()
+
+                    # # Visualize embedding space
+                    # visualize_embedding_space(
+                    #     model=model,
+                    #     data_loader=test_loader,
+                    #     task_type=model_name_id,
+                    #     embedding_size=embed_id,
+                    #     linear_type=LINEAR_REGRESSION[linear_id] if model_name_id == 'regression' else None,
+                    #     model_name=saveModelName
+                    # )
+
+                    # # Plot decision boundary for classification
+                    # if model_name_id == 'classification':
+                    #     generate_decision_boundary(test_loader, model, embed_id, saveModelName)
 
                     all_predictions = []
                     all_targets = []
@@ -413,6 +545,21 @@ def main_gcn_conv() -> None:
                         mse = torch.mean((all_predictions - all_targets) ** 2).item()
                         print(f"Mean Squared Error (MSE) {saveModelName}: {mse:.4f}")
 
+                        log_file_path = os.path.join(CSV_PATH, "mse_log.txt")
+
+                        if not os.path.exists(CSV_PATH):
+                            print(f"Error: The directory {CSV_PATH} does not exist.")
+                        else:
+                            print(f"Logging MSE to: {log_file_path}")
+
+                        try:
+                            with open(log_file_path, "a") as log_file:
+                                log_file.write(f"Model: {saveModelName}, MSE: {mse:.4f}\n")
+                        except Exception as e:
+                            print(f"Error writing to log file: {e}")
+
+                        log.append(f"Model: {saveModelName}, MSE: {mse:.4f}\n")
+
                 model            = None
                 train_loader     = None
                 val_loader       = None
@@ -424,3 +571,5 @@ if __name__ == "__main__":
     
    main_transformer_conv()
    main_gcn_conv()
+
+   print(log)
