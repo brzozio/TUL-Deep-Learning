@@ -26,7 +26,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BATCH_SIZE:     int   = 128
 LEARNING_RATE:  float = 1e-4
-TRAIN:          bool = True
+TRAIN:          bool = False
 CONTINUE_TRAIN: bool = False
 
 log: list = []
@@ -56,6 +56,7 @@ def generate_decision_boundary(test_loader, model, embedding_size, model_name):
         test_loader: DataLoader for the test set.
         model: Trained classification model.
         embedding_size: Size of the embedding space.
+        model_name: Name used for plot title and filename.
     """
     model.eval()
     all_features = []
@@ -63,74 +64,71 @@ def generate_decision_boundary(test_loader, model, embedding_size, model_name):
 
     with torch.no_grad():
         for batch in test_loader:
-            x, edge_index, batch_labels = batch.x.to(DEVICE), batch.edge_index.to(DEVICE), batch.y.to(DEVICE)
-
-            # Ensure input data is float
-            x = x.float()
-            edge_index = edge_index.long()  # Ensure edge_index is long
+            x = batch.x.to(DEVICE).float()
+            edge_index = batch.edge_index.to(DEVICE).long()
+            batch_labels = batch.y.to(DEVICE)
+            batch_vector = batch.batch.to(DEVICE)
 
             print(f"X type: {x.dtype}, edge_index type: {edge_index.dtype}")
 
             # Forward pass to extract embeddings
             embeddings = model.model.conv1(x, edge_index)
             embeddings = model.model.conv2(embeddings, edge_index)
-            embeddings = model.model.pool(embeddings, batch.batch.to(DEVICE))
+            embeddings = model.model.pool(embeddings, batch_vector)
 
             all_features.append(embeddings.cpu())
             all_labels.append(batch_labels.cpu())
 
-    # Combine all features and labels
     all_features = torch.cat(all_features, dim=0).numpy()
     all_labels = torch.cat(all_labels, dim=0).numpy()
 
-    # Reduce embeddings to 2D for visualization if needed
+    # Reduce to 2D if embeddings > 2 dimensions
     if embedding_size > 2:
-        from sklearn.decomposition import PCA
         pca = PCA(n_components=2)
         all_features = pca.fit_transform(all_features)
 
-    # Check if features are 1D or 2D
+    # 1D case: simple scatter plot along x-axis
     if all_features.shape[1] == 1:
-        # If the features are 1D, plot as a 1D scatter plot
         plt.figure(figsize=(8, 6))
-        plt.scatter(all_features[:, 0], np.zeros_like(all_features[:, 0]), c=all_labels, cmap='coolwarm', s=20, edgecolor='k')
+        plt.scatter(all_features[:, 0], np.zeros_like(all_features[:, 0]),
+                    c=all_labels, cmap='coolwarm', s=20, edgecolor='k')
         plt.colorbar(label="Class")
         plt.title(f"{model_name} (Embedding Size={embedding_size})")
         plt.xlabel("Feature 1")
-        plt.grid()
-        plt.savefig(CSV_PATH + f"\\Decision_Boundary_{model_name}_{embedding_size}.jpg")
+        plt.grid(True)
+        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}_{embedding_size}.jpg")
         plt.show()
-
     else:
-        # If the features are 2D or higher, plot normally
-        # Define grid for decision boundary
-        x_min, x_max = all_features[:, 0].min() - 1, all_features[:, 0].max() + 1
-        y_min, y_max = all_features[:, 1].min() - 1, all_features[:, 1].max() + 1
-        xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100))
+        # Create a tighter grid: smaller margin and higher resolution
+        margin = 0.1
+        x_min, x_max = all_features[:, 0].min() - margin, all_features[:, 0].max() + margin
+        y_min, y_max = all_features[:, 1].min() - margin, all_features[:, 1].max() + margin
+        resolution = 300  # increase resolution for a denser grid
+        xx, yy = np.meshgrid(np.linspace(x_min, x_max, resolution),
+                             np.linspace(y_min, y_max, resolution))
 
-        # Predict on the grid points
         grid_points = np.c_[xx.ravel(), yy.ravel()]
         grid_points_tensor = torch.tensor(grid_points, dtype=torch.float32).to(DEVICE)
+
         with torch.no_grad():
+            # Assumes model's forward can accept grid_points_tensor (2D inputs) and return logits.
             grid_predictions = model(grid_points_tensor)
             grid_predictions = torch.softmax(grid_predictions, dim=-1).argmax(dim=-1).cpu().numpy()
+
         grid_predictions = grid_predictions.reshape(xx.shape)
 
-        # Plot decision boundary
         plt.figure(figsize=(8, 6))
         plt.contourf(xx, yy, grid_predictions, alpha=0.6, cmap='coolwarm')
-        plt.scatter(all_features[:, 0], all_features[:, 1], c=all_labels, edgecolor='k', cmap='coolwarm', s=20)
+        plt.scatter(all_features[:, 0], all_features[:, 1], c=all_labels,
+                    edgecolor='k', cmap='coolwarm', s=20)
         plt.title(f"{model_name} (Embedding Size={embedding_size})")
         plt.xlabel("Feature 1")
         plt.ylabel("Feature 2")
         plt.colorbar(label="Class")
-        plt.savefig(CSV_PATH + f"\\Decision_Boundary_{model_name}_{embedding_size}.jpg")
+        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}_{embedding_size}.jpg")
         plt.show()
 
-def visualize_embedding_space(model, data_loader, task_type, embedding_size, linear_type, model_name):
-    """
-    Visualizes the embedding space for a trained model.
-    """
+def visualize_embedding_space(model, data_loader, task_type, embedding_size, model_name, csv_path):
     model.eval()
     all_embeddings = []
     all_labels = []
@@ -139,11 +137,8 @@ def visualize_embedding_space(model, data_loader, task_type, embedding_size, lin
         for batch in data_loader:
             x, edge_index, batch_labels = batch.x.to(DEVICE), batch.edge_index.to(DEVICE), batch.y.to(DEVICE)
 
-            # Forward pass to extract embeddings
             x = x.float()
             edge_index = edge_index.long()
-
-            print(f"X type: {x.dtype}, edge_index type: {edge_index.dtype}")
 
             embeddings = model.model.conv1(x, edge_index)
             embeddings = model.model.conv2(embeddings, edge_index)
@@ -152,39 +147,94 @@ def visualize_embedding_space(model, data_loader, task_type, embedding_size, lin
             all_embeddings.append(embeddings.cpu())
             all_labels.append(batch_labels.cpu())
 
-    # Combine embeddings and labels
     all_embeddings = torch.cat(all_embeddings, dim=0).numpy()
     all_labels = torch.cat(all_labels, dim=0).numpy()
 
-    # If embedding space > 2 dimensions, reduce using PCA
     if embedding_size > 2:
         from sklearn.decomposition import PCA
         pca = PCA(n_components=2)
         all_embeddings = pca.fit_transform(all_embeddings)
 
-    # Check if embeddings are 1D or 2D
-    if all_embeddings.shape[1] == 1:
-        # If the embeddings are 1D, plot as a 1D scatter plot
-        plt.figure(figsize=(8, 6))
-        plt.scatter(all_embeddings[:, 0], np.zeros_like(all_embeddings[:, 0]), c=all_labels.squeeze(), cmap='coolwarm', s=20, edgecolor='k')
-        plt.colorbar(label="Class" if task_type == 'classification' else "Predicted Value")
-        plt.title(f"{model_name} (size={embedding_size})")
-        plt.xlabel("Embedding Dimension 1")
-        plt.grid()
-        plt.savefig(CSV_PATH + f"\\Embedding_Space_{model_name}.jpg")
-        plt.show()
-
+    plt.figure(figsize=(8, 6))
+    
+    if task_type == "regression":
+        scatter = plt.scatter(
+            all_embeddings[:, 0], all_embeddings[:, 1], 
+            c=all_labels.squeeze(), cmap="viridis", s=20, edgecolor="k", alpha=0.75
+        )
+        plt.colorbar(scatter, label="Predicted Value")
     else:
-        # If the embeddings are 2D or higher, plot normally
-        plt.figure(figsize=(8, 6))
-        scatter = plt.scatter(all_embeddings[:, 0], all_embeddings[:, 1], c=all_labels.squeeze(), cmap='coolwarm', s=20, edgecolor='k')
-        plt.colorbar(scatter, label="Class" if task_type == 'classification' else "Predicted Value")
-        plt.title(f"{model_name} (size={embedding_size})")
-        plt.xlabel("Embedding Dimension 1")
-        plt.ylabel("Embedding Dimension 2")
-        plt.grid()
-        plt.savefig(CSV_PATH + f"\\Embedding_Space_{model_name}.jpg")
-        plt.show()
+        scatter = plt.scatter(
+            all_embeddings[:, 0], all_embeddings[:, 1], 
+            c=all_labels.squeeze(), cmap="coolwarm", s=20, edgecolor="k"
+        )
+        plt.colorbar(scatter, label="Class")
+
+    plt.title(f"{model_name} (Embedding Size={embedding_size})")
+    plt.xlabel("Embedding Dimension 1")
+    plt.ylabel("Embedding Dimension 2")
+    plt.grid()
+    plt.savefig(f"{csv_path}/Embedding_Space_{model_name}.jpg")
+    plt.show()
+
+# def visualize_embedding_space(model, data_loader, task_type, embedding_size, linear_type, model_name):
+#     """
+#     Visualizes the embedding space for a trained model.
+#     """
+#     model.eval()
+#     all_embeddings = []
+#     all_labels = []
+
+#     with torch.no_grad():
+#         for batch in data_loader:
+#             x, edge_index, batch_labels = batch.x.to(DEVICE), batch.edge_index.to(DEVICE), batch.y.to(DEVICE)
+
+#             # Forward pass to extract embeddings
+#             x = x.float()
+#             edge_index = edge_index.long()
+
+#             print(f"X type: {x.dtype}, edge_index type: {edge_index.dtype}")
+
+#             embeddings = model.model.conv1(x, edge_index)
+#             embeddings = model.model.conv2(embeddings, edge_index)
+#             embeddings = model.model.pool(embeddings, batch.batch.to(DEVICE))
+
+#             all_embeddings.append(embeddings.cpu())
+#             all_labels.append(batch_labels.cpu())
+
+#     # Combine embeddings and labels
+#     all_embeddings = torch.cat(all_embeddings, dim=0).numpy()
+#     all_labels = torch.cat(all_labels, dim=0).numpy()
+
+#     # If embedding space > 2 dimensions, reduce using PCA
+#     if embedding_size > 2:
+#         from sklearn.decomposition import PCA
+#         pca = PCA(n_components=2)
+#         all_embeddings = pca.fit_transform(all_embeddings)
+
+#     # Check if embeddings are 1D or 2D
+#     if all_embeddings.shape[1] == 1:
+#         # If the embeddings are 1D, plot as a 1D scatter plot
+#         plt.figure(figsize=(8, 6))
+#         plt.scatter(all_embeddings[:, 0], np.zeros_like(all_embeddings[:, 0]), c=all_labels.squeeze(), cmap='coolwarm', s=20, edgecolor='k')
+#         plt.colorbar(label="Class" if task_type == 'classification' else "Predicted Value")
+#         plt.title(f"{model_name} (size={embedding_size})")
+#         plt.xlabel("Embedding Dimension 1")
+#         plt.grid()
+#         plt.savefig(CSV_PATH + f"\\Embedding_Space_{model_name}.jpg")
+#         plt.show()
+
+#     else:
+#         # If the embeddings are 2D or higher, plot normally
+#         plt.figure(figsize=(8, 6))
+#         scatter = plt.scatter(all_embeddings[:, 0], all_embeddings[:, 1], c=all_labels.squeeze(), cmap='coolwarm', s=20, edgecolor='k')
+#         plt.colorbar(scatter, label="Class" if task_type == 'classification' else "Predicted Value")
+#         plt.title(f"{model_name} (size={embedding_size})")
+#         plt.xlabel("Embedding Dimension 1")
+#         plt.ylabel("Embedding Dimension 2")
+#         plt.grid()
+#         plt.savefig(CSV_PATH + f"\\Embedding_Space_{model_name}.jpg")
+#         plt.show()
 
 class FaceIDModel(pl.LightningModule):
     def __init__(self, model, train_loader, val_loader, task_type, lr=1e-4):
@@ -333,7 +383,8 @@ def main_transformer_conv() -> None:
 
     EMBEDDINGS:     list  = [1,2,32]
     LINEAR_REGRESSION:   list  = [True, False]
-    MODEL_NAME:     list  = ["classification", "regression"]
+    # MODEL_NAME:     list  = ["classification", "regression"]
+    MODEL_NAME:     list  = ["regression"]
 
     for model_name_id in MODEL_NAME:
         # loop_count: int = len(LINEAR_REGRESSION) if model_name_id == "regression" else 1
@@ -375,19 +426,19 @@ def main_transformer_conv() -> None:
                     model.eval()
                     model.freeze()
 
-                    #  # Visualize embedding space
-                    # visualize_embedding_space(
-                    #     model=model,
-                    #     data_loader=test_loader,
-                    #     task_type=model_name_id,
-                    #     embedding_size=embed_id,
-                    #     linear_type=LINEAR_REGRESSION[linear_id] if model_name_id == 'regression' else None,
-                    #     model_name=saveModelName
-                    # )
-
-                    # # Plot decision boundary for classification
-                    # if model_name_id == 'classification':
-                    #     generate_decision_boundary(test_loader, model, embed_id, saveModelName)
+                    # Plot decision boundary for classification
+                    if model_name_id == 'classification':
+                        generate_decision_boundary(test_loader, model, embed_id, saveModelName)
+                    else:
+                        # Visualize embedding space
+                        visualize_embedding_space(
+                            model=model,
+                            data_loader=test_loader,
+                            task_type=model_name_id,
+                            embedding_size=embed_id,
+                            linear_type=LINEAR_REGRESSION[linear_id],
+                            model_name=saveModelName
+                        )
 
                     all_predictions = []
                     all_targets = []
@@ -443,7 +494,7 @@ def main_transformer_conv() -> None:
 
 def main_gcn_conv() -> None:
 
-    EMBEDDINGS:     list  = [1,2,32]
+    EMBEDDINGS:     list  = [2,1,32]
     LINEAR_REGRESSION:   list  = [True, False]
     MODEL_NAME:     list  = ["classification","regression"]
     # MODEL_NAME:     list  = ["regression"]
@@ -489,19 +540,19 @@ def main_gcn_conv() -> None:
                     model.eval()
                     model.freeze()
 
-                    # # Visualize embedding space
-                    # visualize_embedding_space(
-                    #     model=model,
-                    #     data_loader=test_loader,
-                    #     task_type=model_name_id,
-                    #     embedding_size=embed_id,
-                    #     linear_type=LINEAR_REGRESSION[linear_id] if model_name_id == 'regression' else None,
-                    #     model_name=saveModelName
-                    # )
-
-                    # # Plot decision boundary for classification
-                    # if model_name_id == 'classification':
-                    #     generate_decision_boundary(test_loader, model, embed_id, saveModelName)
+                    # Plot decision boundary for classification
+                    if model_name_id == 'classification':
+                        generate_decision_boundary(test_loader, model, embed_id, saveModelName)
+                    else:
+                        # Visualize embedding space
+                        visualize_embedding_space(
+                            model=model,
+                            data_loader=test_loader,
+                            task_type=model_name_id,
+                            embedding_size=embed_id,
+                            linear_type=LINEAR_REGRESSION[linear_id],
+                            model_name=saveModelName
+                        )
 
                     all_predictions = []
                     all_targets = []
@@ -570,7 +621,7 @@ def main_gcn_conv() -> None:
 
 if __name__ == "__main__":
     
-   main_transformer_conv()
    main_gcn_conv()
+   main_transformer_conv()
 
    print(log)
