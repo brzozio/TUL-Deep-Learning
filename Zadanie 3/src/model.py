@@ -4,7 +4,7 @@ from torch_geometric.nn import GCNConv, TransformerConv, global_mean_pool
 
 
 class GNNModelClassification(nn.Module):
-    def __init__(self, embedding: int = 32):
+    def __init__(self, linear, embedding: int = 32):
         super(GNNModelClassification, self).__init__()
 
         self.conv1 = TransformerConv(in_channels=9, out_channels=16)
@@ -12,8 +12,15 @@ class GNNModelClassification(nn.Module):
 
         self.pool = global_mean_pool
 
-        self.fc1 = nn.Linear(embedding, embedding*2)
-        self.fc2 = nn.Linear(embedding*2, 2)
+        if linear:
+            self.fc1 = nn.Linear(embedding, 2)
+            self.fc2 = None
+        else:
+            self.fc1 = nn.Linear(embedding, embedding * 2)
+            self.fc2 = nn.Linear(embedding * 2, 2)
+
+        # self.fc1 = nn.Linear(embedding, embedding*2)
+        # self.fc2 = nn.Linear(embedding*2, 2)
 
         self.relu = nn.ReLU()
         self.output_activation = nn.Sigmoid()
@@ -39,8 +46,11 @@ class GNNModelClassification(nn.Module):
 
         x = self.pool(x, batch)
 
-        x = self.relu(self.fc1(x))
-        x = self.fc2(x)
+        if self.fc2 is None:
+            x = self.relu(self.fc1(x))
+        else:
+            x = self.relu(self.fc1(x))
+            x = self.fc2(x)
 
         return self.output_activation(x)
 
@@ -93,7 +103,7 @@ class GNNModelRegression(nn.Module):
         return self.output_activation(x)
     
 class GNNModelClassification_GCNConv(nn.Module):
-    def __init__(self, embedding: int = 32):
+    def __init__(self, linear,  embedding: int = 32):
         super(GNNModelClassification_GCNConv, self).__init__()
 
         self.conv1 = GCNConv(in_channels=9, out_channels=16)
@@ -101,8 +111,15 @@ class GNNModelClassification_GCNConv(nn.Module):
 
         self.pool = global_mean_pool
 
-        self.fc1 = nn.Linear(embedding, embedding*2)
-        self.fc2 = nn.Linear(embedding*2, 2)
+        if linear:
+            self.fc1 = nn.Linear(embedding, 2)
+            self.fc2 = None
+        else:
+            self.fc1 = nn.Linear(embedding, embedding * 2)
+            self.fc2 = nn.Linear(embedding * 2, 2)
+
+        # self.fc1 = nn.Linear(embedding, embedding*2)
+        # self.fc2 = nn.Linear(embedding*2, 2)
 
         self.relu = nn.ReLU()
         self.output_activation = nn.Sigmoid()
@@ -128,8 +145,11 @@ class GNNModelClassification_GCNConv(nn.Module):
 
         x = self.pool(x, batch)
 
-        x = self.relu(self.fc1(x))
-        x = self.fc2(x)
+        if self.fc2 is None:
+            x = self.relu(self.fc1(x))
+        else:
+            x = self.relu(self.fc1(x))
+            x = self.fc2(x)
 
         return self.output_activation(x)
 

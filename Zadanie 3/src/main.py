@@ -26,7 +26,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BATCH_SIZE:     int   = 128
 LEARNING_RATE:  float = 1e-4
-TRAIN:          bool = False
+TRAIN:          bool = True
 CONTINUE_TRAIN: bool = False
 
 log: list = []
@@ -333,19 +333,19 @@ def main_transformer_conv() -> None:
 
     EMBEDDINGS:     list  = [1,2,32]
     LINEAR_REGRESSION:   list  = [True, False]
-    # MODEL_NAME:     list  = ["regression", "classification"]
-    MODEL_NAME:     list  = ["regression"]
+    MODEL_NAME:     list  = ["classification", "regression"]
 
     for model_name_id in MODEL_NAME:
-        loop_count: int = len(LINEAR_REGRESSION) if model_name_id == "regression" else 1
+        # loop_count: int = len(LINEAR_REGRESSION) if model_name_id == "regression" else 1
+        loop_count: int = len(LINEAR_REGRESSION)
         for embed_id in EMBEDDINGS:
 
             for linear_id in range(loop_count):
 
                 if model_name_id == "classification":
                     train_loader, val_loader, test_loader = get_data('BACE', 'classification')
-                    model_core = GNNModelClassification(embedding=embed_id).to(DEVICE)
-                    saveModelName: str = f"TransformerConv_{model_name_id}_{embed_id}"
+                    model_core = GNNModelClassification(embedding=embed_id, linear=LINEAR_REGRESSION[linear_id]).to(DEVICE)
+                    saveModelName: str = f"TransformerConv_{model_name_id}_{embed_id}_{'liniowy' if LINEAR_REGRESSION[linear_id] == True else 'nieliniowy'}"
                     
                 elif model_name_id == "regression":
                     train_loader, val_loader, test_loader = get_data('QM9', 'regression')
@@ -445,19 +445,20 @@ def main_gcn_conv() -> None:
 
     EMBEDDINGS:     list  = [1,2,32]
     LINEAR_REGRESSION:   list  = [True, False]
-    # MODEL_NAME:     list  = ["regression", "classification"]
-    MODEL_NAME:     list  = ["regression"]
+    MODEL_NAME:     list  = ["classification","regression"]
+    # MODEL_NAME:     list  = ["regression"]
 
     for model_name_id in MODEL_NAME:
-        loop_count: int = len(LINEAR_REGRESSION) if model_name_id == "regression" else 1
+        loop_count: int = len(LINEAR_REGRESSION)
+        # loop_count: int = len(LINEAR_REGRESSION) if model_name_id == "regression" else 1
         for embed_id in EMBEDDINGS:
 
             for linear_id in range(loop_count):
 
                 if model_name_id == "classification":
                     train_loader, val_loader, test_loader = get_data('BACE', 'classification')
-                    model_core = GNNModelClassification_GCNConv(embedding=embed_id).to(DEVICE)
-                    saveModelName: str = f"GCNConv_{model_name_id}_{embed_id}"
+                    model_core = GNNModelClassification_GCNConv(embedding=embed_id, linear=LINEAR_REGRESSION[linear_id]).to(DEVICE)
+                    saveModelName: str = f"GCNConv_{model_name_id}_{embed_id}_{'liniowy' if LINEAR_REGRESSION[linear_id] == True else 'nieliniowy'}"
                     
                 elif model_name_id == "regression":
                     train_loader, val_loader, test_loader = get_data('QM9', 'regression')
