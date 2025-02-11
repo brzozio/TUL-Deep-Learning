@@ -26,7 +26,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BATCH_SIZE:     int   = 128
 LEARNING_RATE:  float = 1e-4
-TRAIN:          bool = False
+TRAIN:          bool = True
 CONTINUE_TRAIN: bool = False
 
 log: list = []
