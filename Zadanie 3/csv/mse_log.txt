@@ -1,6 +1,0 @@
-Model: GCNConv_regression_1_liniowy, MSE: 1.6747
-Model: GCNConv_regression_1_nieliniowy, MSE: 1.6735
-Model: GCNConv_regression_2_liniowy, MSE: 48.6226
-Model: GCNConv_regression_2_nieliniowy, MSE: 1.6733
-Model: GCNConv_regression_32_liniowy, MSE: 48.6226
-Model: GCNConv_regression_32_nieliniowy, MSE: 1.6706

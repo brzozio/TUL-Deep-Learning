@@ -16,6 +16,7 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sns
 from model import GNNModelRegression, GNNModelRegression_GCNConv,  GNNModelClassification, GNNModelClassification_GCNConv
 import numpy as np
+from matplotlib.colors import ListedColormap, BoundaryNorm
 
 # Paths and Constants
 SRC_PATH = os.path.abspath(os.path.dirname(__file__))
@@ -24,10 +25,10 @@ MODELS_PATH = os.path.join(os.path.dirname(SRC_PATH), "models")
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-BATCH_SIZE:     int   = 128
-LEARNING_RATE:  float = 1e-4
+BATCH_SIZE:     int   = 64
+LEARNING_RATE:  float = 1e-10
 TRAIN:          bool = True
-CONTINUE_TRAIN: bool = False
+CONTINUE_TRAIN: bool = True
 
 log: list = []
 
@@ -48,193 +49,6 @@ def plot_losses(train_losses, val_losses, modelname):
     plt.legend()
     plt.grid()
     plt.savefig(CSV_PATH+f"\\Losses_{modelname}.jpg")
-
-def generate_decision_boundary(test_loader, model, embedding_size, model_name):
-    """
-    Generate a decision boundary plot for classification tasks.
-    Args:
-        test_loader: DataLoader for the test set.
-        model: Trained classification model.
-        embedding_size: Size of the embedding space.
-        model_name: Name used for plot title and filename.
-    """
-    model.eval()
-    all_features = []
-    all_labels = []
-
-    with torch.no_grad():
-        for batch in test_loader:
-            x = batch.x.to(DEVICE).float()
-            edge_index = batch.edge_index.to(DEVICE).long()
-            batch_labels = batch.y.to(DEVICE)
-            batch_vector = batch.batch.to(DEVICE)
-
-            print(f"X type: {x.dtype}, edge_index type: {edge_index.dtype}")
-
-            # Forward pass to extract embeddings
-            embeddings = model.model.conv1(x, edge_index)
-            embeddings = model.model.conv2(embeddings, edge_index)
-            embeddings = model.model.pool(embeddings, batch_vector)
-
-            all_features.append(embeddings.cpu())
-            all_labels.append(batch_labels.cpu())
-
-    all_features = torch.cat(all_features, dim=0).numpy()
-    all_labels = torch.cat(all_labels, dim=0).numpy()
-
-    # Reduce to 2D if embeddings > 2 dimensions
-    if embedding_size > 2:
-        pca = PCA(n_components=2)
-        all_features = pca.fit_transform(all_features)
-
-    # 1D case: simple scatter plot along x-axis
-    if all_features.shape[1] == 1:
-        plt.figure(figsize=(8, 6))
-        plt.scatter(all_features[:, 0], np.zeros_like(all_features[:, 0]),
-                    c=all_labels, cmap='coolwarm', s=20, edgecolor='k')
-        plt.colorbar(label="Class")
-        plt.title(f"{model_name} (Embedding Size={embedding_size})")
-        plt.xlabel("Feature 1")
-        plt.grid(True)
-        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}_{embedding_size}.jpg")
-        plt.show()
-    else:
-        # Create a tighter grid: smaller margin and higher resolution
-        margin = 0.1
-        x_min, x_max = all_features[:, 0].min() - margin, all_features[:, 0].max() + margin
-        y_min, y_max = all_features[:, 1].min() - margin, all_features[:, 1].max() + margin
-        resolution = 300  # increase resolution for a denser grid
-        xx, yy = np.meshgrid(np.linspace(x_min, x_max, resolution),
-                             np.linspace(y_min, y_max, resolution))
-
-        grid_points = np.c_[xx.ravel(), yy.ravel()]
-        grid_points_tensor = torch.tensor(grid_points, dtype=torch.float32).to(DEVICE)
-
-        with torch.no_grad():
-            # Assumes model's forward can accept grid_points_tensor (2D inputs) and return logits.
-            grid_predictions = model(grid_points_tensor)
-            grid_predictions = torch.softmax(grid_predictions, dim=-1).argmax(dim=-1).cpu().numpy()
-
-        grid_predictions = grid_predictions.reshape(xx.shape)
-
-        plt.figure(figsize=(8, 6))
-        plt.contourf(xx, yy, grid_predictions, alpha=0.6, cmap='coolwarm')
-        plt.scatter(all_features[:, 0], all_features[:, 1], c=all_labels,
-                    edgecolor='k', cmap='coolwarm', s=20)
-        plt.title(f"{model_name} (Embedding Size={embedding_size})")
-        plt.xlabel("Feature 1")
-        plt.ylabel("Feature 2")
-        plt.colorbar(label="Class")
-        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}_{embedding_size}.jpg")
-        plt.show()
-
-def visualize_embedding_space(model, data_loader, task_type, embedding_size, model_name, csv_path):
-    model.eval()
-    all_embeddings = []
-    all_labels = []
-
-    with torch.no_grad():
-        for batch in data_loader:
-            x, edge_index, batch_labels = batch.x.to(DEVICE), batch.edge_index.to(DEVICE), batch.y.to(DEVICE)
-
-            x = x.float()
-            edge_index = edge_index.long()
-
-            embeddings = model.model.conv1(x, edge_index)
-            embeddings = model.model.conv2(embeddings, edge_index)
-            embeddings = model.model.pool(embeddings, batch.batch.to(DEVICE))
-
-            all_embeddings.append(embeddings.cpu())
-            all_labels.append(batch_labels.cpu())
-
-    all_embeddings = torch.cat(all_embeddings, dim=0).numpy()
-    all_labels = torch.cat(all_labels, dim=0).numpy()
-
-    if embedding_size > 2:
-        from sklearn.decomposition import PCA
-        pca = PCA(n_components=2)
-        all_embeddings = pca.fit_transform(all_embeddings)
-
-    plt.figure(figsize=(8, 6))
-    
-    if task_type == "regression":
-        scatter = plt.scatter(
-            all_embeddings[:, 0], all_embeddings[:, 1], 
-            c=all_labels.squeeze(), cmap="viridis", s=20, edgecolor="k", alpha=0.75
-        )
-        plt.colorbar(scatter, label="Predicted Value")
-    else:
-        scatter = plt.scatter(
-            all_embeddings[:, 0], all_embeddings[:, 1], 
-            c=all_labels.squeeze(), cmap="coolwarm", s=20, edgecolor="k"
-        )
-        plt.colorbar(scatter, label="Class")
-
-    plt.title(f"{model_name} (Embedding Size={embedding_size})")
-    plt.xlabel("Embedding Dimension 1")
-    plt.ylabel("Embedding Dimension 2")
-    plt.grid()
-    plt.savefig(f"{csv_path}/Embedding_Space_{model_name}.jpg")
-    plt.show()
-
-# def visualize_embedding_space(model, data_loader, task_type, embedding_size, linear_type, model_name):
-#     """
-#     Visualizes the embedding space for a trained model.
-#     """
-#     model.eval()
-#     all_embeddings = []
-#     all_labels = []
-
-#     with torch.no_grad():
-#         for batch in data_loader:
-#             x, edge_index, batch_labels = batch.x.to(DEVICE), batch.edge_index.to(DEVICE), batch.y.to(DEVICE)
-
-#             # Forward pass to extract embeddings
-#             x = x.float()
-#             edge_index = edge_index.long()
-
-#             print(f"X type: {x.dtype}, edge_index type: {edge_index.dtype}")
-
-#             embeddings = model.model.conv1(x, edge_index)
-#             embeddings = model.model.conv2(embeddings, edge_index)
-#             embeddings = model.model.pool(embeddings, batch.batch.to(DEVICE))
-
-#             all_embeddings.append(embeddings.cpu())
-#             all_labels.append(batch_labels.cpu())
-
-#     # Combine embeddings and labels
-#     all_embeddings = torch.cat(all_embeddings, dim=0).numpy()
-#     all_labels = torch.cat(all_labels, dim=0).numpy()
-
-#     # If embedding space > 2 dimensions, reduce using PCA
-#     if embedding_size > 2:
-#         from sklearn.decomposition import PCA
-#         pca = PCA(n_components=2)
-#         all_embeddings = pca.fit_transform(all_embeddings)
-
-#     # Check if embeddings are 1D or 2D
-#     if all_embeddings.shape[1] == 1:
-#         # If the embeddings are 1D, plot as a 1D scatter plot
-#         plt.figure(figsize=(8, 6))
-#         plt.scatter(all_embeddings[:, 0], np.zeros_like(all_embeddings[:, 0]), c=all_labels.squeeze(), cmap='coolwarm', s=20, edgecolor='k')
-#         plt.colorbar(label="Class" if task_type == 'classification' else "Predicted Value")
-#         plt.title(f"{model_name} (size={embedding_size})")
-#         plt.xlabel("Embedding Dimension 1")
-#         plt.grid()
-#         plt.savefig(CSV_PATH + f"\\Embedding_Space_{model_name}.jpg")
-#         plt.show()
-
-#     else:
-#         # If the embeddings are 2D or higher, plot normally
-#         plt.figure(figsize=(8, 6))
-#         scatter = plt.scatter(all_embeddings[:, 0], all_embeddings[:, 1], c=all_labels.squeeze(), cmap='coolwarm', s=20, edgecolor='k')
-#         plt.colorbar(scatter, label="Class" if task_type == 'classification' else "Predicted Value")
-#         plt.title(f"{model_name} (size={embedding_size})")
-#         plt.xlabel("Embedding Dimension 1")
-#         plt.ylabel("Embedding Dimension 2")
-#         plt.grid()
-#         plt.savefig(CSV_PATH + f"\\Embedding_Space_{model_name}.jpg")
-#         plt.show()
 
 class FaceIDModel(pl.LightningModule):
     def __init__(self, model, train_loader, val_loader, task_type, lr=1e-4):
@@ -327,7 +141,7 @@ def get_data(dataset_name, task_type):
     print(f"edge_index type: {type(train_dataset[0].edge_index)} | shape: {train_dataset[0].edge_index.shape if isinstance(train_dataset[0].edge_index, torch.Tensor) else 'Not a tensor'}")
 
     return (
-        GeoDataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=6, persistent_workers=True),
+        GeoDataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=6, persistent_workers=True),
         GeoDataLoader(val_dataset, batch_size=BATCH_SIZE, num_workers=6, persistent_workers=True),
         GeoDataLoader(test_dataset, batch_size=BATCH_SIZE, num_workers=6)
     )
@@ -359,11 +173,11 @@ def train_model(model, modelname):
     )
 
     if "regression" in modelname:
-        EPOCHS:         int   = 100
-        PATIENCE:       int   = 3
-    else:
-        EPOCHS:         int   = 400
+        EPOCHS:         int   = 1000
         PATIENCE:       int   = 10
+    else:
+        EPOCHS:         int   = 10000
+        PATIENCE:       int   = 200
 
 
     early_stopping = EarlyStopping(monitor="val_loss", patience=PATIENCE, verbose=True, mode="min")
@@ -381,10 +195,9 @@ def train_model(model, modelname):
 
 def main_transformer_conv() -> None:
 
-    EMBEDDINGS:     list  = [1,2,32]
+    EMBEDDINGS:     list  = [1,2]
     LINEAR_REGRESSION:   list  = [True, False]
-    # MODEL_NAME:     list  = ["classification", "regression"]
-    MODEL_NAME:     list  = ["regression"]
+    MODEL_NAME:     list  = ["classification"]#, "regression"]
 
     for model_name_id in MODEL_NAME:
         # loop_count: int = len(LINEAR_REGRESSION) if model_name_id == "regression" else 1
@@ -408,7 +221,7 @@ def main_transformer_conv() -> None:
                 if TRAIN:
                     print(f"Running a training for {saveModelName}")
                     if CONTINUE_TRAIN:
-                        checkpoint_path = os.path.join(MODELS_PATH, f"{model_name_id}.ckpt")
+                        checkpoint_path = os.path.join(MODELS_PATH, f"{saveModelName}.ckpt")
                         model = FaceIDModel.load_from_checkpoint(checkpoint_path, model=model_core, train_loader=train_loader, val_loader=val_loader, task_type=model_name_id, lr=LEARNING_RATE)
                     train_losses, val_losses = train_model(model, saveModelName)
                     plot_losses(train_losses, val_losses, saveModelName)
@@ -426,19 +239,11 @@ def main_transformer_conv() -> None:
                     model.eval()
                     model.freeze()
 
-                    # Plot decision boundary for classification
-                    if model_name_id == 'classification':
-                        generate_decision_boundary(test_loader, model, embed_id, saveModelName)
-                    else:
-                        # Visualize embedding space
-                        visualize_embedding_space(
-                            model=model,
-                            data_loader=test_loader,
-                            task_type=model_name_id,
-                            embedding_size=embed_id,
-                            linear_type=LINEAR_REGRESSION[linear_id],
-                            model_name=saveModelName
-                        )
+                    # # Plot decision boundary for classification
+                    # if model_name_id == 'classification':
+                    #     generate_decision_boundary(test_loader, model, embed_id, saveModelName)
+                    # else:
+                    #     plot_regression_function(test_loader, model, embed_id, saveModelName)
 
                     all_predictions = []
                     all_targets = []
@@ -471,13 +276,13 @@ def main_transformer_conv() -> None:
                         test_accuracy = (all_predictions == all_targets).float().mean().item() * 100
                         print(f"Test Accuracy: {test_accuracy:.4f}%")
 
-                        cm = confusion_matrix(all_targets, all_predictions)
-                        plt.figure(figsize=(8, 6))
-                        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Negative', 'Positive'], yticklabels=['Negative', 'Positive'])
-                        plt.xlabel('Predicted Labels')
-                        plt.ylabel('True Labels')
-                        plt.title(saveModelName)
-                        plt.show()
+                        # cm = confusion_matrix(all_targets, all_predictions)
+                        # plt.figure(figsize=(8, 6))
+                        # sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Negative', 'Positive'], yticklabels=['Negative', 'Positive'])
+                        # plt.xlabel('Predicted Labels')
+                        # plt.ylabel('True Labels')
+                        # plt.title(saveModelName)
+                        # plt.show()
 
                     elif model_name_id == 'regression':
                         mse = torch.mean((all_predictions - all_targets) ** 2).item()
@@ -619,9 +424,222 @@ def main_gcn_conv() -> None:
                 test_loader      = None
                 model_core       = None
 
+def generate_decision_boundary(test_loader, model, embedding_size, model_name):
+    model.eval()
+    all_features = []
+    all_labels = []
+    with torch.no_grad():
+        for batch in test_loader:
+            x = batch.x.to(DEVICE).float()
+            edge_index = batch.edge_index.to(DEVICE).long()
+            batch_labels = batch.y.to(DEVICE)
+            batch_vector = batch.batch.to(DEVICE)
+
+            emb = model.model.conv1(x, edge_index)
+            emb = model.model.conv2(emb, edge_index)
+            emb = model.model.pool(emb, batch_vector)
+
+            all_features.append(emb.cpu())
+            all_labels.append(batch_labels.cpu())
+
+    all_features = torch.cat(all_features, dim=0).numpy()
+    all_labels = torch.cat(all_labels, dim=0).numpy()
+    all_labels = np.squeeze(all_labels)  # usuwa nadmiarowe wymiary
+
+    # Redukcja wymiaru, jeśli embedding > 2
+    if embedding_size > 2:
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=2)
+        all_features = pca.fit_transform(all_features)
+
+    # 1D embedding
+    if all_features.shape[1] == 1:
+        # Ustalamy zakres osi x
+        x_min, x_max = all_features[:, 0].min() - 1.0, all_features[:, 0].max() + 1.0
+        grid_x = np.linspace(x_min, x_max, 300)
+        grid_tensor = torch.tensor(grid_x, dtype=torch.float32).unsqueeze(1).to(DEVICE)
+
+        with torch.no_grad():
+            fc1 = model.fc1 if hasattr(model, "fc1") else model.model.fc1
+            fc2 = model.fc2 if hasattr(model, "fc2") else getattr(model.model, "fc2", None)
+            relu = model.relu if hasattr(model, "relu") else model.model.relu
+
+            out = relu(fc1(grid_tensor))
+            if fc2 is not None:
+                out = fc2(out)
+            out = out
+
+            # Obsługa różnych wariantów wyjścia modelu:
+            if out.shape[1] == 1:
+                # Jeśli pojedynczy neuron (zakładamy, że już przez Sigmoid -> [0,1])
+                probs = out.squeeze(1).cpu().numpy()
+            else:
+                # Jeśli dwa neurony, stosujemy softmax i wybieramy prawdopodobieństwo klasy 1.
+                probs = torch.softmax(out, dim=-1)[:, 1].cpu().numpy()
+
+        plt.figure(figsize=(8, 6))
+        # Rozdzielamy punkty: klasa 0 na y=0, klasa 1 na y=1
+        x_class0 = all_features[all_labels == 0, 0]
+        x_class1 = all_features[all_labels == 1, 0]
+        # plt.scatter(x_class0, np.zeros_like(x_class0),
+        #             color='blue', edgecolor='k', label='Klasa 0')
+        # plt.scatter(x_class1, np.ones_like(x_class1),
+        #             color='red', edgecolor='k', label='Klasa 1')
+        
+        plt.scatter(x_class0, np.zeros_like(x_class0), color='blue', label='Nie')
+        plt.scatter(x_class1, np.zeros_like(x_class1), color='red', label='Inhibitor')
+        
+        # Rysujemy krzywą prawdopodobieństwa klasy 1
+        plt.plot(grid_x, probs, color='green', label='Prawdopodobieństwo Inhibitor')
+        # Szukamy punktów, gdzie p przekracza 0.5 (granica decyzyjna)
+        boundary_indices = np.where(np.diff((probs >= 0.5).astype(int)) != 0)[0]
+        for idx in boundary_indices:
+            bx = (grid_x[idx] + grid_x[idx+1]) / 2.0
+            plt.axvline(x=bx, color='gray', linestyle='--', alpha=0.7)
+
+        plt.title(f"{model_name} (Embedding Size={embedding_size})")
+        plt.xlabel("Feature 1")
+        plt.ylabel("Prawdopodobieństwo / Klasa")
+        plt.ylim([-0.2, 1.2])
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}_{embedding_size}.jpg")
+    else:
+        # Generujemy siatkę
+        margin = 1.0
+        x_min, x_max = all_features[:,0].min() - margin, all_features[:,0].max() + margin
+        y_min, y_max = all_features[:,1].min() - margin, all_features[:,1].max() + margin
+        resolution = 300
+        xx, yy = np.meshgrid(np.linspace(x_min, x_max, resolution),
+                             np.linspace(y_min, y_max, resolution))
+        grid_points = np.c_[xx.ravel(), yy.ravel()]
+        grid_tensor = torch.tensor(grid_points, dtype=torch.float32).to(DEVICE)
+
+        with torch.no_grad():
+            # Wywołanie warstw FC modelu
+            fc1 = model.fc1 if hasattr(model, "fc1") else model.model.fc1
+            fc2 = model.fc2 if hasattr(model, "fc2") else getattr(model.model, "fc2", None)
+            relu = model.relu if hasattr(model, "relu") else model.model.relu
+
+            out = relu(fc1(grid_tensor))
+            if fc2 is not None:
+                out = fc2(out)
+            out = out
+
+            # Sprawdzamy wymiar wyjścia
+            if out.shape[1] == 1:
+                # Binary classification z pojedynczym wyjściem (Sigmoid)
+                preds = (out >= 0.5).long().squeeze(dim=-1)
+            else:
+                # Binary classification (2 wyjścia) lub multi-class
+                preds = torch.softmax(out, dim=-1).argmax(dim=-1)
+
+            preds = preds.cpu().numpy()
+
+        preds = preds.reshape(xx.shape)
+
+        # Dyskretna mapa barw
+        cmap = ListedColormap(['blue', 'red'])
+        bounds = [-0.5, 0.5, 1.5]  # granice między klasami 0 i 1
+        norm = BoundaryNorm(bounds, cmap.N)
+
+        plt.figure(figsize=(8,6))
+        plt.contourf(xx, yy, preds, alpha=0.6, cmap=cmap, norm=norm)
+        plt.scatter(all_features[:,0], all_features[:,1],
+                    c=all_labels, cmap=cmap, norm=norm,
+                    edgecolor='k', s=20)
+        plt.title(f"{model_name} (Embedding Size={embedding_size})")
+        plt.xlabel("Feature 1")
+        plt.ylabel("Feature 2")
+        plt.colorbar(ticks=[0,1], label="Class")
+        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}_{embedding_size}.jpg")
+
+
+def plot_regression_function(test_loader, model, embedding_size, model_name):
+    """
+    Wizualizuje funkcję regresji.
+    Dla 1D: wykres 2D (osadzenie vs wartość).
+    Dla 2D: wykres 3D (powierzchnia funkcji).
+    """
+    model.eval()
+    all_features = []
+    all_targets = []
+    with torch.no_grad():
+        for batch in test_loader:
+            x = batch.x.to(DEVICE).float()
+            edge_index = batch.edge_index.to(DEVICE).long()
+            targets = batch.y.to(DEVICE)
+            batch_vector = batch.batch.to(DEVICE)
+            emb = model.model.conv1(x, edge_index)
+            emb = model.model.conv2(emb, edge_index)
+            emb = model.model.pool(emb, batch_vector)
+            all_features.append(emb.cpu())
+            all_targets.append(targets.cpu())
+    all_features = torch.cat(all_features, dim=0).numpy()
+    all_targets = torch.cat(all_targets, dim=0).numpy()
+    if embedding_size > 2:
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=2)
+        all_features = pca.fit_transform(all_features)
+    if all_features.shape[1] == 1:
+        margin = 0.1
+        x_min, x_max = all_features[:,0].min()-margin, all_features[:,0].max()+margin
+        grid_x = np.linspace(x_min, x_max, 300)
+        grid_tensor = torch.tensor(grid_x, dtype=torch.float32).unsqueeze(1).to(DEVICE)
+        with torch.no_grad():
+            fc1 = model.fc1 if hasattr(model, "fc1") else model.model.fc1
+            fc2 = model.fc2 if hasattr(model, "fc2") else getattr(model.model, "fc2", None)
+            relu = model.relu if hasattr(model, "relu") else model.model.relu
+            output_activation = model.output_activation if hasattr(model, "output_activation") else model.model.output_activation
+            out = relu(fc1(grid_tensor))
+            if fc2 is not None:
+                out = fc2(out)
+            out = output_activation(out)
+            preds = out.squeeze().cpu().numpy()
+        plt.figure(figsize=(8,6))
+        plt.scatter(all_features[:,0], all_targets, color='blue', alpha=0.6, label='Test data')
+        plt.plot(grid_x, preds, color='red', linewidth=2, label='Regression function')
+        plt.title(f"{model_name} Regression (Embedding Size=1)")
+        plt.xlabel("Feature")
+        plt.ylabel("Target")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(CSV_PATH + f"/Regression_Function_{model_name}_1D.jpg")
+    elif all_features.shape[1] == 2:
+        margin = 0.1
+        x_min, x_max = all_features[:,0].min()-margin, all_features[:,0].max()+margin
+        y_min, y_max = all_features[:,1].min()-margin, all_features[:,1].max()+margin
+        resolution = 100
+        xx, yy = np.meshgrid(np.linspace(x_min, x_max, resolution),
+                             np.linspace(y_min, y_max, resolution))
+        grid_points = np.c_[xx.ravel(), yy.ravel()]
+        grid_tensor = torch.tensor(grid_points, dtype=torch.float32).to(DEVICE)
+        with torch.no_grad():
+            fc1 = model.fc1 if hasattr(model, "fc1") else model.model.fc1
+            fc2 = model.fc2 if hasattr(model, "fc2") else getattr(model.model, "fc2", None)
+            relu = model.relu if hasattr(model, "relu") else model.model.relu
+            output_activation = model.output_activation if hasattr(model, "output_activation") else model.model.output_activation
+            out = relu(fc1(grid_tensor))
+            if fc2 is not None:
+                out = fc2(out)
+            out = output_activation(out)
+            preds = out.squeeze().cpu().numpy()
+        preds = preds.reshape(xx.shape)
+        from mpl_toolkits.mplot3d import Axes3D
+        fig = plt.figure(figsize=(10,8))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot_surface(xx, yy, preds, cmap='viridis', alpha=0.8)
+        ax.scatter(all_features[:,0], all_features[:,1], all_targets, color='red', s=20, label='Test data')
+        ax.set_title(f"{model_name} Regression (Embedding Size=2)")
+        ax.set_xlabel("Feature 1")
+        ax.set_ylabel("Feature 2")
+        ax.set_zlabel("Target")
+        plt.legend()
+        plt.savefig(CSV_PATH + f"/Regression_Function_{model_name}_2D.jpg")
+
 if __name__ == "__main__":
     
-   main_gcn_conv()
+#    main_gcn_conv()
    main_transformer_conv()
 
    print(log)
