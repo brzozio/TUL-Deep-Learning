@@ -44,9 +44,43 @@ class GNNModelClassification(nn.Module):
         x = self.dropout(x)
 
         if self.fc2 is None:
-            x = self.relu(self.fc1(x))
+            x = self.fc1(x)
         else:
             x = self.relu(self.fc1(x))
+            x = self.dropout(x)
+            x = self.fc2(x)
+
+        return x
+
+    def embed(self, data):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+
+        print(f"x type: {type(x)} | shape: {x.shape if isinstance(x, torch.Tensor) else 'Not a tensor'}")
+        
+        if not isinstance(x, torch.Tensor):
+            raise ValueError("Input x should be a tensor")
+        
+        if len(x.shape) != 2 or x.shape[1] != 9:
+            raise ValueError(f"Unexpected shape of x. Expected [num_nodes, 9] but got {x.shape}")
+
+        x = x.float()
+
+        if edge_index is None or batch is None:
+            raise ValueError("Input data must contain edge_index and batch.")
+        
+        x = self.relu(self.conv1(x, edge_index))
+        x = self.relu(self.conv2(x, edge_index))
+        x = self.pool(x, batch)
+        x = self.dropout(x)
+        
+        return x
+    
+    def mlp(self, x_in):
+
+        if self.fc2 is None:
+            x = self.relu(self.fc1(x_in))
+        else:
+            x = self.relu(self.fc1(x_in))
             x = self.dropout(x)
             x = self.fc2(x)
 
@@ -96,6 +130,38 @@ class GNNModelRegression(nn.Module):
             x = self.relu(self.fc1(x))
         else:
             x = self.relu(self.fc1(x))
+            x = self.fc2(x)
+
+        return self.output_activation(x)
+
+    def embed(self, data):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+
+        print(f"x type: {type(x)} | shape: {x.shape if isinstance(x, torch.Tensor) else 'Not a tensor'}")
+        
+        if not isinstance(x, torch.Tensor):
+            raise ValueError("Input x should be a tensor")
+        
+        if len(x.shape) != 2 or x.shape[1] != 11:
+            raise ValueError(f"Unexpected shape of x. Expected [num_nodes, 11] but got {x.shape}")
+
+        x = x.float()
+
+        if edge_index is None or batch is None:
+            raise ValueError("Input data must contain edge_index and batch.")
+
+        x = self.relu(self.conv1(x, edge_index))
+        x = self.relu(self.conv2(x, edge_index))
+
+        x = self.pool(x, batch)
+
+        return x
+    
+    def mlp(self, x_in):
+        if self.fc2 is None:
+            x = self.fc1(x_in)
+        else:
+            x = self.relu(self.fc1(x_in))
             x = self.fc2(x)
 
         return self.output_activation(x)
