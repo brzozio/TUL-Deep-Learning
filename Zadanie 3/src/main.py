@@ -76,23 +76,23 @@ class FaceIDModel(pl.LightningModule):
 
         if self.task_type == 'classification':
             y = y.squeeze().long()
-            ce_loss = nn.CrossEntropyLoss()(y_hat, y)
+            loss = nn.CrossEntropyLoss()(y_hat, y)
             
-            l2_reg = torch.tensor(0., device=y_hat.device)
-            for param in self.parameters():
-                l2_reg += torch.norm(param, 2)
+            # l2_reg = torch.tensor(0., device=y_hat.device)
+            # for param in self.parameters():
+            #     l2_reg += torch.norm(param, 2)
             
-            loss = ce_loss + reg_lambda * l2_reg
+            # loss = ce_loss + reg_lambda * l2_reg
 
         elif self.task_type == 'regression':
             y = y.squeeze().float()
-            mse_loss = nn.MSELoss()(y_hat, y)
+            loss = nn.MSELoss()(y_hat, y)
             
-            l2_reg = torch.tensor(0., device=y_hat.device)
-            for param in self.parameters():
-                l2_reg += torch.norm(param, 2)
+            # l2_reg = torch.tensor(0., device=y_hat.device)
+            # for param in self.parameters():
+            #     l2_reg += torch.norm(param, 2)
             
-            loss = mse_loss + reg_lambda * l2_reg
+            # loss = mse_loss + reg_lambda * l2_reg
 
         # if self.task_type == 'classification':
         #     # y_hat = (y_hat > 0.5).long()
@@ -214,8 +214,8 @@ def train_model(model, modelname):
 def main_transformer_conv() -> None:
 
     EMBEDDINGS:     list  = [1,2]
-    LINEAR_REGRESSION:   list  = [True,False]
-    MODEL_NAME:     list  = ["classification", "regression"]
+    LINEAR_REGRESSION:   list  = [True, False]
+    MODEL_NAME:     list  = ["regression"]
 
     for model_name_id in MODEL_NAME:
         # loop_count: int = len(LINEAR_REGRESSION) if model_name_id == "regression" else 1
@@ -490,13 +490,13 @@ def generate_decision_boundary(test_loader, model, embedding_size, model_name):
 
             out = model.model.mlp(grid_tensor)
 
-            # Obsługa różnych wariantów wyjścia modelu:
-            if out.shape[1] == 1:
-                # Jeśli pojedynczy neuron (zakładamy, że już przez Sigmoid -> [0,1])
-                probs = out.squeeze(1).cpu().numpy()
-            else:
-                # Jeśli dwa neurony, stosujemy softmax i wybieramy prawdopodobieństwo klasy 1.
-                probs = torch.softmax(out, dim=-1)[:, 1].cpu().numpy()
+            # # Obsługa różnych wariantów wyjścia modelu:
+            # if out.shape[1] == 1:
+            #     # Jeśli pojedynczy neuron (zakładamy, że już przez Sigmoid -> [0,1])
+            #     probs = out.squeeze(1).cpu().numpy()
+            # else:
+            #     # Jeśli dwa neurony, stosujemy softmax i wybieramy prawdopodobieństwo klasy 1.
+            probs = torch.softmax(out, dim=-1)[:, 1].cpu().numpy()
 
         plt.figure(figsize=(8, 6))
         # Rozdzielamy punkty: klasa 0 na y=0, klasa 1 na y=1
@@ -524,7 +524,7 @@ def generate_decision_boundary(test_loader, model, embedding_size, model_name):
         plt.ylim([-0.2, 1.2])
         plt.grid(True)
         plt.legend()
-        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}_{embedding_size}.jpg")
+        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}.jpg")
     else:
         # Generujemy siatkę
         margin = 1.0
@@ -550,14 +550,14 @@ def generate_decision_boundary(test_loader, model, embedding_size, model_name):
             #     out = fc2(out)
             # out = out
 
-            # Sprawdzamy wymiar wyjścia
-            if out.shape[1] == 1:
-                # Binary classification z pojedynczym wyjściem (Sigmoid)
-                preds = (out >= 0.5).long().squeeze(dim=-1)
-            else:
-                # Binary classification (2 wyjścia) lub multi-class
-                preds = torch.softmax(out, dim=-1).argmax(dim=-1)
-                print(preds)
+            # # Sprawdzamy wymiar wyjścia
+            # if out.shape[1] == 1:
+            #     # Binary classification z pojedynczym wyjściem (Sigmoid)
+            #     preds = (out >= 0.5).long().squeeze(dim=-1)
+            # else:
+            #     # Binary classification (2 wyjścia) lub multi-class
+            preds = torch.softmax(out, dim=-1).argmax(dim=-1)
+            print(preds)
 
             preds = preds.cpu().numpy()
 
@@ -577,7 +577,7 @@ def generate_decision_boundary(test_loader, model, embedding_size, model_name):
         plt.xlabel("Feature 1")
         plt.ylabel("Feature 2")
         plt.colorbar(ticks=[0,1], label="Class")
-        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}_{embedding_size}.jpg")
+        plt.savefig(CSV_PATH + f"/Decision_Boundary_{model_name}.jpg")
 
 
 def plot_regression_function(test_loader, model, embedding_size, model_name):
