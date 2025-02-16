@@ -27,8 +27,8 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BATCH_SIZE:     int   = 128
 LEARNING_RATE:  float = 1e-4
-TRAIN:          bool = True
-CONTINUE_TRAIN: bool = False
+TRAIN:          bool = False
+CONTINUE_TRAIN: bool = True
 
 log: list = []
 
@@ -608,6 +608,8 @@ def plot_regression_function(test_loader, model, embedding_size, model_name):
     if all_features.shape[1] == 1:
         margin = 0.1
         x_min, x_max = all_features[:,0].min()-margin, all_features[:,0].max()+margin
+        print(f"1D MIN: {all_features[:,0].min()} , MAX: {all_features[:,0].max()}")
+
         grid_x = np.linspace(x_min, x_max, 300)
         grid_tensor = torch.tensor(grid_x, dtype=torch.float32).unsqueeze(1).to(DEVICE)
 
@@ -630,7 +632,10 @@ def plot_regression_function(test_loader, model, embedding_size, model_name):
     elif all_features.shape[1] == 2:
         margin = 0.1
         x_min, x_max = all_features[:,0].min()-margin, all_features[:,0].max()+margin
+        print(f"2D 0 MIN: {all_features[:,0].min()} , MAX: {all_features[:,0].max()}")
+
         y_min, y_max = all_features[:,1].min()-margin, all_features[:,1].max()+margin
+        print(f"2D 1 MIN: {all_features[:,1].min()} , MAX: {all_features[:,1].max()}")
         resolution = 100
         xx, yy = np.meshgrid(np.linspace(x_min, x_max, resolution),
                              np.linspace(y_min, y_max, resolution))
